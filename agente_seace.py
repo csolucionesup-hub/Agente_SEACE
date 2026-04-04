@@ -224,13 +224,26 @@ async def ejecutar_agente():
             try:
                 # Filtrar el clic para tomar el tab explícito usando el rol seguro de PrimeFaces
                 btn_tab = page.locator("li[role='tab']:has-text('Buscador de Procedimientos de Selección')").first
-                await btn_tab.click(force=True)
+                await btn_tab.scroll_into_view_if_needed()
                 
-                # Esperamos a que el panel estructural cambie a visible mediante su etiqueta
-                panel_activo = page.locator('.ui-tabs-panel:visible').first
-                await panel_activo.locator('xpath=descendant::*[contains(text(), "Objeto de Contratación")]').first.wait_for(state="visible", timeout=TIMEOUT_PORTAL)
+                # Bucle de validación estricta para garantizar que cambiamos de pestaña
+                tab_activo = False
+                for _ in range(5):
+                    await btn_tab.click(force=True)
+                    try:
+                        # PrimeFaces añade la clase 'ui-state-active' al li cuando está seleccionado
+                        await page.locator("li[role='tab'].ui-state-active:has-text('Buscador de Procedimientos de Selección')").wait_for(state="visible", timeout=3000)
+                        tab_activo = True
+                        break
+                    except Exception:
+                        await page.wait_for_timeout(1000)
+                        
+                if not tab_activo:
+                    raise Exception("El portal no respondió al clic de la pestaña; falló la validación 'ui-state-active'")
+                
+                # Esperar pequeña estabilización tras la animación del cambio de tab
                 await page.wait_for_timeout(1500)
-                logger.info("✅ Panel de búsqueda detectado.")
+                logger.info("✅ Panel de búsqueda detectado genuinamente.")
             except Exception as nav_e:
                 logger.error(f"❌ No se pudo cargar el buscador por vía normal: {nav_e}")
                 # Entramos a la capa de visión IA de ser necesario
