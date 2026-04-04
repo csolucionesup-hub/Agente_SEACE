@@ -1,10 +1,12 @@
 import os
 import logging
+from pathlib import Path
 from google import genai
 from dotenv import load_dotenv
 
-# Carga la llave desde el .env
-load_dotenv()
+# Ruta absoluta al .env — funciona independientemente del directorio de trabajo
+_ENV_PATH = Path(__file__).parent / ".env"
+load_dotenv(dotenv_path=_ENV_PATH)
 api_key = os.getenv("GEMINI_API_KEY")
 
 logger = logging.getLogger(__name__)

@@ -50,17 +50,19 @@ async def clic_con_vision_ia(page: Page, tarea_objetivo: str) -> bool:
 async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text: str):
     """Selección ultra-robusta para componentes PrimeFaces con fallback de IA."""
     try:
-        # Estrategia principal: localizar el contenedor del dropdown por label cercano
-        container = page.locator("div.ui-selectonemenu").filter(
-            has=page.locator(f"xpath=ancestor::tr//label[contains(text(), '{label_text}')]")
-        ).first
+        # Estrategia: buscar la fila que contiene el label, luego el dropdown dentro de ella
+        # Esto es más confiable que filtrar por XPath ancestor:: (que da ambigüedad)
+        fila_label = page.locator(
+            f"xpath=//label[contains(text(), '{label_text}')]/ancestor::tr[1]"
+        )
+        container = fila_label.locator("div.ui-selectonemenu").first
 
         # Scroll para asegurar visibilidad y evitar capas transparentes
         await container.scroll_into_view_if_needed()
         trigger = container.locator(".ui-selectonemenu-trigger")
-        await trigger.click(force=True)  # force=True ignora overlays de PrimeFaces
+        await trigger.click(force=True)
 
-        # Panel visible por atributo de estilo (más confiable que :visible en Playwright)
+        # Esperar el panel del dropdown abierto
         panel = page.locator("div.ui-selectonemenu-panel").filter(
             has=page.locator("li.ui-selectonemenu-item")
         ).last
@@ -194,6 +196,9 @@ async def ejecutar_agente():
                           wait_until="networkidle", timeout=60000)
             await page.click('a:has-text("Buscador de Procedimientos de Selección")')
             await page.wait_for_selector('div[id$="tab1"][aria-hidden="false"]', timeout=15000)
+            # Espera extra para que PrimeFaces termine de renderizar los dropdowns
+            await page.wait_for_selector('div.ui-selectonemenu', state="visible", timeout=15000)
+            await page.wait_for_timeout(1000)
 
             anyo_inicial = 2025
             anyo_actual = datetime.datetime.now().year
@@ -206,10 +211,10 @@ async def ejecutar_agente():
                     await seleccionar_opcion_primefaces(page, "Objeto de Contratación", "Obra")
                     await seleccionar_opcion_primefaces(page, "Año de la Convocatoria", str(anyo))
 
-                    # Rellenar el filtro de descripción con la keyword actual
-                    input_desc_selector = 'input[id$="descripcionObjeto"]'
-                    await page.wait_for_selector(input_desc_selector, state="visible")
-                    await page.fill(input_desc_selector, keyword, force=True)
+                    # Rellenar el filtro de descripción — usar el primer input visible para evitar ambigüedad
+                    input_desc = page.locator('input[id$="descripcionObjeto"]').first
+                    await input_desc.wait_for(state="visible")
+                    await input_desc.fill(keyword)
 
                     # Buscar — usa JS click como fallback si el botón aparece deshabilitado
                     btn_buscar = page.locator('button[id$="btnBuscarSelToken"]')
