@@ -69,6 +69,7 @@ async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text
 
         # Paso 3: Abrir el panel con force=True para ignorar overlays de PrimeFaces
         await trigger_locator.click(force=True, timeout=10000)
+        await page.wait_for_timeout(1000) # Respirar antes de que cargue la lista flotante
 
         # Paso 4: Esperar el panel flotante y seleccionar la opción con coincidencia EXACTA
         panel_selector = "div.ui-selectonemenu-panel:visible"
@@ -77,10 +78,9 @@ async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text
         await page.locator(f"{panel_selector} li.ui-selectonemenu-item:text-is('{option_text}')").first.click()
 
         await esperar_procesamiento(page)
-        # TRUCO SENIOR: PrimeFaces tarda un milisegundo en despachar el Ajax que borra el DOM. 
-        # Si no esperamos fijamente aquí, Playwright intentará ubicar el siguiente cuadro de texto y...
-        # ...luego PrimeFaces lo borrará por debajo, dejando a Playwright en un timeout eterno.
-        await page.wait_for_timeout(2000)
+        # ACUERDO DE RELAJACIÓN: Darle a PrimeFaces 4 segundos fijos para asentar la red y los callbacks
+        # de Javascript internos tras haber tocado cualquier selector crítico.
+        await page.wait_for_timeout(4000)
         
         logger.info(f"✅ Seleccionado '{option_text}' en '{label_text}'")
         return True
@@ -99,8 +99,9 @@ async def capturar_ficha_seace(page: Page, keyword: str, institucion: str, year:
         # 1. Espera de Seguridad: Verificamos que el cronograma cargó
         await page.wait_for_selector('text="Cronograma"', state="visible", timeout=30000)
         
-        # 2. Pequeña pausa para que PrimeFaces termine las animaciones de tablas
-        await page.wait_for_timeout(2000)
+        # 2. Pausa grande requerida para que PrimeFaces termine de dibujar el Cronograma
+        # total y las grillas CSS tras hacer efectiva la navegación por AJAX.
+        await page.wait_for_timeout(5000)
         
         # 3. Generar nombre de archivo con orden exacto: PALABRA_CLAVE + FECHA + ENTIDAD
         fecha_captura = datetime.datetime.now().strftime("%Y%m%d")
@@ -128,7 +129,8 @@ async def capturar_ficha_seace(page: Page, keyword: str, institucion: str, year:
         
         # Esperar a que la tabla principal (resultados) vuelva a ser visible
         await page.wait_for_selector('tbody[id$="dtProcesos_data"]', state="visible", timeout=30000)
-        await page.wait_for_timeout(1000)
+        # Darle a la tabla 4 segundos para que refresque visualmente si había un spinner
+        await page.wait_for_timeout(4000)
         
         return True
     except Exception as e:
@@ -141,8 +143,8 @@ async def scanear_resultados(page: Page, keyword: str, year: int, drive_handler:
         table_selector = 'tbody[id$="dtProcesos_data"]'
         row_selector = f'{table_selector} tr.ui-widget-content'
 
-        # TIP SENIOR: Esperar un momento a que el AJAX dibuje los resultados o el mensaje de vacío
-        await page.wait_for_timeout(1500)
+        # TIP SENIOR: Esperar pacientemente (4 segundos) a que el AJAX dibuje los resultados o el mensaje de vacío
+        await page.wait_for_timeout(4000)
         empty_msg = page.locator('td.ui-datatable-empty-message')
         if await empty_msg.is_visible():
             logger.info("ℹ️ No se encontraron resultados en esta página.")
@@ -241,8 +243,8 @@ async def ejecutar_agente():
                 if not tab_activo:
                     raise Exception("El portal no respondió al clic de la pestaña; falló la validación 'ui-state-active'")
                 
-                # Esperar pequeña estabilización tras la animación del cambio de tab
-                await page.wait_for_timeout(1500)
+                # Esperar generosamente la estabilización tras la animación de PrimeFaces para el cambio de tab
+                await page.wait_for_timeout(5000)
                 logger.info("✅ Panel de búsqueda detectado genuinamente.")
             except Exception as nav_e:
                 logger.error(f"❌ No se pudo cargar el buscador por vía normal: {nav_e}")
@@ -272,6 +274,7 @@ async def ejecutar_agente():
                     
                     # Playwright maneja internamente la espera con fill
                     await input_desc.fill(keyword, timeout=15000)
+                    await page.wait_for_timeout(2000) # Dejar que el cajón registre el texto visualmente
 
                     # Buscar — Localiza el botón 'Buscar' explícitamente en el panel visible
                     btn_buscar = panel_activo.locator('button:has-text("Buscar"), button[id$="btnBuscarSelToken"]').first
