@@ -12,36 +12,41 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text: str, timeout: int = 15000):
-    """Selecciona una opción en un componente SelectOneMenu de PrimeFaces."""
+# Palabras clave a buscar en el portal SEACE
+KEYWORDS = ["puente", "pilotes", "cimentación profunda", "muro pantalla"]
+
+async def esperar_procesamiento(page: Page):
+    """Espera a que el indicador de carga de PrimeFaces desaparezca."""
     try:
-        label_locator = page.get_by_text(label_text).first
-        label_for = await label_locator.get_attribute('for')
-        base_id = label_for if label_for else None
-        
-        if not base_id:
-            label_id = await label_locator.get_attribute('id')
-            if label_id and '_label' in label_id:
-                base_id = label_id.replace('_label', '')
-        
-        if base_id:
-            trigger_selector = f'div[id$="{base_id}"] .ui-selectonemenu-trigger'
-        else:
-            trigger_selector = f'xpath=//td[contains(., "{label_text}")]/following-sibling::td//div[contains(@class, "ui-selectonemenu-trigger")]'
+        await page.wait_for_selector(".ui-blockui", state="hidden", timeout=10000)
+    except:
+        pass  # Si no aparece el overlay, no hay problema
 
-        await page.wait_for_selector(trigger_selector, state="visible", timeout=timeout)
-        await page.click(trigger_selector, force=True)
+async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text: str):
+    """Selección ultra-robusta para componentes PrimeFaces."""
+    try:
+        # Localizamos el contenedor del dropdown basado en el texto del label cercano
+        container = page.locator("div.ui-selectonemenu").filter(
+            has=page.locator(f"xpath=ancestor::tr//label[contains(text(), '{label_text}')]")
+        ).first
 
-        await page.wait_for_selector('div.ui-selectonemenu-panel:visible', state="visible", timeout=timeout)
-        option_locator = page.locator('div.ui-selectonemenu-panel:visible li.ui-selectonemenu-item').filter(has_text=option_text).first
-        await option_locator.click(force=True)
-        # Primefaces carga un overlay transparente después de seleccionar, hay que esperar un poco
-        await page.wait_for_timeout(1500)
-        
+        trigger = container.locator(".ui-selectonemenu-trigger")
+        await trigger.click()
+
+        # Esperar al panel específico que se hizo visible
+        panel_selector = "div.ui-selectonemenu-panel[style*='display: block']"
+        await page.wait_for_selector(panel_selector, state="visible")
+
+        # Seleccionar la opción con texto exacto
+        await page.locator(f"{panel_selector} li.ui-selectonemenu-item").filter(
+            has_text=option_text
+        ).first.click()
+
+        await esperar_procesamiento(page)
         logger.info(f"✅ Seleccionado '{option_text}' en '{label_text}'")
         return True
     except Exception as e:
-        logger.warning(f"⚠️ No se pudo seleccionar '{option_text}' en '{label_text}': {str(e)}")
+        logger.error(f"❌ Error en PrimeFaces ({label_text}): {e}")
         return False
 
 async def capturar_y_subir(page: Page, texto_proyecto: str, year: int, drive_handler: GDriveHandler, folder_id: str):
@@ -70,51 +75,46 @@ async def capturar_y_subir(page: Page, texto_proyecto: str, year: int, drive_han
 async def scanear_resultados(page: Page, year: int, drive_handler: GDriveHandler, folder_id: str):
     """Escanea la tabla y gestiona hallazgos."""
     try:
-        # Esperar específicamente a las filas de datos con contenido real, no a la tabla vacía
         table_selector = 'tbody[id$="dtProcesos_data"]'
-        
-        # Esperar hasta que aparezca la clase ui-widget-content que indica filas reales
         row_selector = f'{table_selector} tr.ui-widget-content'
+
+        # TIP SENIOR: Verificación temprana de tabla vacía antes de iterar
+        empty_msg = page.locator('td.ui-datatable-empty-message')
+        if await empty_msg.is_visible():
+            logger.info("ℹ️ No se encontraron resultados en esta página.")
+            return False
+
         await page.wait_for_selector(row_selector, state="visible", timeout=30000)
-        
-        # Extraemos count primero. Si la tabla cambia, count en teoría es idéntico por página
         count = await page.locator(row_selector).count()
-        
+
         encontrado_en_esta_pagina = False
         for i in range(count):
             # Recargar el locator base de la fila CADA iteración
             await page.wait_for_selector(row_selector, state="visible", timeout=30000)
             fila = page.locator(row_selector).nth(i)
-            
-            # Validar que no sea la fila de "No se encontraron registros"
-            clases = await fila.get_attribute("class")
-            if clases and "ui-datatable-empty-message" in clases:
-                break
-                
+
             texto_fila = await fila.inner_text()
             if len(texto_fila.strip()) > 10:
                 logger.info(f"🌉 ENTRANDO A FICHA: {texto_fila.strip()[:60]}...")
-                
-                # Clic en el botón "Ver Ficha de Selección" (es el 2do icono en 'Acciones')
+
+                # Clic en el botón "Ver Ficha de Selección" (2do icono en 'Acciones')
                 btn_ficha = fila.locator('td').last.locator('a, button').nth(1)
                 await btn_ficha.click(force=True)
-                
-                # Esperamos que aparezca la ficha (buscando el texto Regresar)
+
+                # Esperamos que aparezca la ficha
                 await page.wait_for_selector('text="Regresar"', state="visible", timeout=30000)
-                await page.wait_for_timeout(1000) # Dejar que termine de pintar la UI
-                
-                # Toma foto a toda la ficha y la sube
+                await page.wait_for_timeout(1000)
+
                 await capturar_y_subir(page, texto_fila, year, drive_handler, folder_id)
-                
+
                 # Volver a resultados
                 await page.locator('text="Regresar"').first.click(force=True)
-                
-                # Esperar a que la tabla vuelva a aparecer para seguir la iteración asincronamente
+                await esperar_procesamiento(page)
                 await page.wait_for_selector(row_selector, state="visible", timeout=30000)
-                await page.wait_for_timeout(2000) # Espera a estabilizar PrimeFaces
-                
+                await page.wait_for_timeout(2000)
+
                 encontrado_en_esta_pagina = True
-        
+
         return encontrado_en_esta_pagina
     except Exception as e:
         logger.error(f"Error en escaneo: {e}")
@@ -153,40 +153,40 @@ async def ejecutar_agente():
             anyo_actual = datetime.datetime.now().year
 
             for anyo in range(anyo_inicial, anyo_actual + 1):
-                logger.info(f"🚀 Iniciando búsqueda para el año {anyo}...")
-                
-                # Seleccionar parámetros comunes
-                await seleccionar_opcion_primefaces(page, "Objeto de Contratación", "Obra")
-                await seleccionar_opcion_primefaces(page, "Año de la Convocatoria", str(anyo))
-                
-                # Audit Fix: Usar el filtro de descripción para buscar 'puente' directamente
-                # Esto es MUCHO más eficiente que escanear páginas manualmente
-                input_desc_selector = 'input[id$="descripcionObjeto"]'
-                await page.wait_for_selector(input_desc_selector, state="visible")
-                await page.fill(input_desc_selector, "puente", force=True)
+                for keyword in KEYWORDS:
+                    logger.info(f"🚀 Iniciando búsqueda: año={anyo}, keyword='{keyword}'...")
 
-                # Buscar
-                await page.click('button[id$="btnBuscarSelToken"]', force=True)
-                # Esperar a que pase el AJAX de PrimeFaces
-                await page.wait_for_timeout(3000)
-                await page.wait_for_load_state("networkidle")
+                    # Seleccionar parámetros de búsqueda
+                    await seleccionar_opcion_primefaces(page, "Objeto de Contratación", "Obra")
+                    await seleccionar_opcion_primefaces(page, "Año de la Convocatoria", str(anyo))
 
-                pagina = 1
-                while True:
-                    logger.info(f"📄 Año {anyo} - Revisando página {pagina}...")
-                    await scanear_resultados(page, anyo, drive_handler, folder_id)
-                    
-                    next_btn = page.locator('.ui-paginator-next').first
-                    is_disabled = "ui-state-disabled" in (await next_btn.get_attribute("class") or "")
-                    
-                    if is_disabled:
-                        break
-                    
-                    await next_btn.click()
+                    # Rellenar el filtro de descripción con la keyword actual
+                    input_desc_selector = 'input[id$="descripcionObjeto"]'
+                    await page.wait_for_selector(input_desc_selector, state="visible")
+                    await page.fill(input_desc_selector, keyword, force=True)
+
+                    # Buscar y esperar respuesta AJAX de PrimeFaces
+                    await page.click('button[id$="btnBuscarSelToken"]', force=True)
+                    await esperar_procesamiento(page)
                     await page.wait_for_load_state("networkidle")
-                    pagina += 1
-                
-                logger.info(f"✅ Búsqueda terminada para el año {anyo}.")
+
+                    pagina = 1
+                    while True:
+                        logger.info(f"📄 [{keyword}] Año {anyo} - Revisando página {pagina}...")
+                        await scanear_resultados(page, anyo, drive_handler, folder_id)
+
+                        next_btn = page.locator('.ui-paginator-next').first
+                        is_disabled = "ui-state-disabled" in (await next_btn.get_attribute("class") or "")
+
+                        if is_disabled:
+                            break
+
+                        await next_btn.click()
+                        await esperar_procesamiento(page)
+                        await page.wait_for_load_state("networkidle")
+                        pagina += 1
+
+                    logger.info(f"✅ Búsqueda terminada: año={anyo}, keyword='{keyword}'.")
 
         except Exception as e:
             logger.error(f"Error crítico: {e}")
