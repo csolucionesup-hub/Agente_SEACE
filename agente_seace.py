@@ -23,6 +23,30 @@ async def esperar_procesamiento(page: Page):
     except:
         pass  # Si no aparece el overlay, no hay problema
 
+async def clic_con_vision_ia(page: Page, tarea_objetivo: str) -> bool:
+    """
+    Fallback inteligente: si un selector fijo falla, la IA analiza el DOM
+    y propone el selector correcto para completar la tarea.
+    """
+    if cerebro_ia is None:
+        logger.warning("🤖 Fallback de IA no disponible (sin API Key).")
+        return False
+    try:
+        logger.info(f"🧠 Consultando a Gemini para: {tarea_objetivo}...")
+        html_contexto = await page.locator("form").inner_html()
+        nuevo_selector = await cerebro_ia.razonar_selector(html_contexto, tarea_objetivo)
+
+        if nuevo_selector:
+            logger.info(f"👁️ IA encontró el elemento: '{nuevo_selector}'")
+            await page.locator(nuevo_selector).scroll_into_view_if_needed()
+            await page.click(nuevo_selector, force=True)
+            return True
+
+        return False
+    except Exception as e:
+        logger.error(f"❌ La visión de IA falló: {e}")
+        return False
+
 async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text: str):
     """Selección ultra-robusta para componentes PrimeFaces con fallback de IA."""
     try:
@@ -49,29 +73,25 @@ async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text
 
     except Exception as e:
         logger.warning(f"⚠️ Selector principal falló para '{label_text}': {e}")
-
-        if cerebro_ia is None:
-            logger.warning("🤖 Fallback de IA no disponible (sin API Key).")
-            return False
-
         logger.info("🤖 Activando fallback de IA (Gemini)...")
-        try:
-            html_form = await page.locator("form").first.inner_html()
-            objetivo = f"Hacer clic en el trigger del dropdown cuyo label dice '{label_text}'"
-            selector_ia = await cerebro_ia.razonar_selector(html_form, objetivo)
 
-            if selector_ia:
-                await page.click(selector_ia, force=True)
-                panel_selector = "div.ui-selectonemenu-panel[style*='display: block']"
-                await page.wait_for_selector(panel_selector, state="visible")
-                await page.locator(f"{panel_selector} li.ui-selectonemenu-item").filter(
-                    has_text=option_text
-                ).first.click()
+        # Intentar que la IA haga clic en el trigger del dropdown
+        tarea = f"Hacer clic en el trigger del dropdown cuyo label dice '{label_text}'"
+        clicked = await clic_con_vision_ia(page, tarea)
+
+        if clicked:
+            # Si la IA loó abrir el dropdown, ahora seleccionamos la opción
+            try:
+                panel = page.locator("div.ui-selectonemenu-panel").filter(
+                    has=page.locator("li.ui-selectonemenu-item")
+                ).last
+                await panel.wait_for(state="visible", timeout=10000)
+                await panel.locator("li.ui-selectonemenu-item").filter(has_text=option_text).first.click(force=True)
                 await esperar_procesamiento(page)
                 logger.info(f"✅ [IA] Seleccionado '{option_text}' en '{label_text}'")
                 return True
-        except Exception as e_ia:
-            logger.error(f"❌ Fallback de IA también falló ({label_text}): {e_ia}")
+            except Exception as e_panel:
+                logger.error(f"❌ No se pudo seleccionar la opción tras el clic de IA: {e_panel}")
 
         return False
 
