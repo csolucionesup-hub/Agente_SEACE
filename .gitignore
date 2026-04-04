@@ -1,0 +1,28 @@
+# --- Seguridad y Credenciales ---
+credentials.json
+token.json
+.env
+*.pem
+*.key
+
+# --- Python / Entorno Virtual ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+build/
+dist/
+
+# --- Archivos del Agente (Evita subir basura local) ---
+*.log
+screenshots/
+*.png
+*.jpg
+temp/
+
+# --- IDEs ---
+.vscode/
+.idea/
+.DS_Store
