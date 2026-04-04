@@ -52,19 +52,16 @@ async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text
     """Selección semántica label → tr → dropdown, con fallback de IA."""
     try:
         # Paso 1: Restringimos la búsqueda EXCLUSIVAMENTE al panel de pestaña visible 
-        # Esto evita atrapar los dropdowns ocultos de la pestaña paralela (ACF) y es inmune a IDs como j_idt
+        # Extraemos la celda contigua exacta (following-sibling::td) para evitar colisiones en filas con múltiples campos
         panel_activo = page.locator('.ui-tabs-panel:visible').first
-        fila_label = panel_activo.locator(
-            f"xpath=descendant::*[contains(text(), '{label_text}')]/ancestor::tr[1]"
-        ).first
-        container = fila_label.locator("div.ui-selectonemenu").first
+        trigger_locator = panel_activo.locator(
+            f"xpath=descendant::td[contains(., '{label_text}')]/following-sibling::td[1]//div[contains(@class, 'ui-selectonemenu')]"
+        ).first.locator(".ui-selectonemenu-trigger")
 
-        # Paso 2: Asegurarnos que es visible y hacer scroll antes de cualquier clic
-        await container.wait_for(state="visible", timeout=10000)
-        await container.scroll_into_view_if_needed()
+        await trigger_locator.scroll_into_view_if_needed()
 
         # Paso 3: Abrir el panel con force=True para ignorar overlays de PrimeFaces
-        await container.locator(".ui-selectonemenu-trigger").click(force=True)
+        await trigger_locator.click(force=True, timeout=10000)
 
         # Paso 4: Esperar el panel flotante y seleccionar la opción con coincidencia EXACTA
         panel_selector = "div.ui-selectonemenu-panel:visible"
@@ -246,13 +243,12 @@ async def ejecutar_agente():
                     # PASO 3: Ver que la versión del SEACE sea la versión 3
                     await seleccionar_opcion_primefaces(page, "Version SEACE", "Seace 3")
 
-                    # Rellenar el filtro de descripción — Búsqueda estructural inmune a IDs (usando panel activo + label)
+                    # Rellenar el filtro de descripción — Búsqueda de celda vecina exacta, sin esperas volátiles
                     panel_activo = page.locator('.ui-tabs-panel:visible').first
-                    fila_desc = panel_activo.locator('xpath=descendant::*[contains(text(), "Descripción del Objeto")]/ancestor::tr[1]').first
-                    input_desc = fila_desc.locator('input[type="text"]')
+                    input_desc = panel_activo.locator('xpath=descendant::td[contains(., "Descripción del Objeto")]/following-sibling::td[1]//input[@type="text"]').first
                     
-                    await input_desc.first.wait_for(state="visible")
-                    await input_desc.first.fill(keyword)
+                    # Playwright maneja internamente la espera con fill
+                    await input_desc.fill(keyword, timeout=15000)
 
                     # Buscar — Localiza el botón 'Buscar' explícitamente en el panel visible
                     btn_buscar = panel_activo.locator('button:has-text("Buscar"), button[id$="btnBuscarSelToken"]').first
