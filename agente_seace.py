@@ -110,10 +110,12 @@ async def capturar_ficha_seace(page: Page, texto_proyecto: str, year: int, drive
                 logger.info(f"🚀 Respaldado en Drive con ID: {file_id}")
                 os.remove(filepath)  # Limpieza local automática
         
-        # 6. Regresar a la lista de resultados
-        await page.locator('button:has-text("Regresar"), a:has-text("Regresar")').first.click(force=True)
+        # 6. Regresar a la lista de resultados usando el botón marcado en rojo
+        btn_regresar = page.locator('button:has-text("Regresar"), a:has-text("Regresar"), span:has-text("Regresar")').first
+        await btn_regresar.click(force=True)
         await esperar_procesamiento(page)
-        # Esperar a que la tabla principal vuelva a ser visible
+        
+        # Esperar a que la tabla principal (resultados) vuelva a ser visible
         await page.wait_for_selector('tbody[id$="dtProcesos_data"]', state="visible", timeout=30000)
         await page.wait_for_timeout(1000)
         
