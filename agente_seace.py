@@ -14,7 +14,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Palabras clave a buscar en el portal SEACE
-KEYWORDS_INGENIERIA = ["PUENTE", "PILOTES", "CIMENTACION", "MURO PANTALLA", "VIADUCTO"]
+KEYWORDS_INGENIERIA = [
+    "PUENTE", "CARRETERA", "PILOTE", "MICROPILOTE", 
+    "CFA", "MUELLE", "PILOTE HINCADO"
+]
 
 async def esperar_procesamiento(page: Page):
     """Espera a que los indicadores de carga de PrimeFaces desaparezcan."""
@@ -99,16 +102,18 @@ async def capturar_ficha_seace(page: Page, keyword: str, institucion: str, year:
     try:
         # 1. Navegación Profunda: Entrar a la Ficha desde el Historial Intermedio
         # SEACE usa una estructura anidada: Buscador -> Historial -> Ficha
-        await page.wait_for_selector('text="Visualizar historial de contratación"', state="visible", timeout=15000)
+        # (Ocultando validación textual por recomendación heurística externa)
+        await page.wait_for_timeout(8000)
         profundidad = 1
-        # El renderizado de PrimeFaces requiere asentar los eventos (Hydration) antes del clic
-        await page.wait_for_timeout(3000)
         
-        # Buscar el icono de "Hoja/Documento" en la última columna (Acciones)
-        btn_ver_ficha = page.locator('tbody.ui-datatable-data').first.locator('tr').first.locator('td').last.locator('a, img').first
-        await btn_ver_ficha.click(timeout=10000)
+        # Buscar el enlace que contiene el icono CORRECTO de "Ver Ficha de Selección" (Checklist verde)
+        btn_ver_ficha = page.locator('tbody.ui-datatable-data').first.locator('tr').first.locator('a:has(img[title="Ver Ficha de Selección"])').first
         
-        # 2. Espera de Seguridad: Verificamos que el cronograma cargó finalmente
+        # Si la tabla intermedia existe, taladramos a la capa final
+        if await btn_ver_ficha.is_visible():
+            await btn_ver_ficha.click(timeout=10000)
+            
+        # 2. Espera de Seguridad: Verificamos que el cronograma cargó finalmente (Ancla Estructural Nivel 1)
         await page.locator(':has-text("Cronograma")').first.wait_for(state="visible", timeout=30000)
         profundidad = 2 # Declaramos nivel 2 únicamente si el DOM del Cronograma existe
         
@@ -194,17 +199,23 @@ async def scanear_resultados(page: Page, keyword: str, year: int, drive_handler:
                 ).first
 
                 if await btn_ficha.is_visible():
-                    logger.info(f"📅 Extrayendo entidad y abriendo Ficha para: {texto_proyecto[:40]}...")
+                    logger.info(f"📅 Extrayendo entidad y abriendo Historial Interno para: {texto_proyecto[:40]}...")
                     
                     # OBLIGATORIO: Obtener el texto ANTES de hacer clic, para no enfrentarse a un DOM muerto
                     institucion_texto = await fila.locator('td').nth(1).inner_text()
                     
-                    await btn_ficha.click(force=True)
+                    # PrimeFaces Event Hydration
+                    await page.wait_for_timeout(4000)
+                    
+                    # Playwright nativo es preferido sobre JS para emular el rastro humano si el nodo es visible
+                    await btn_ficha.scroll_into_view_if_needed()
+                    await btn_ficha.click(timeout=10000)
 
                     # La validación 'Regresar' se mantiene como señal de que llegamos a la siguiente capa
                     await page.wait_for_selector('text="Regresar"', state="visible", timeout=30000)
 
-                    # La función capturar_ficha_seace se encarga de esperar el cronograma, capturar y regresar
+                    # La función capturar_ficha_seace se encarga de esperar el cronograma, capturar y doble-regresar
+
                     await capturar_ficha_seace(page, keyword, institucion_texto, year, drive_handler, folder_id)
                 else:
                     logger.warning(f"⚠️ No se encontró el icono de Ficha en la fila: {texto_fila[:40]}...")
@@ -290,46 +301,73 @@ async def ejecutar_agente():
                 await seleccionar_opcion_primefaces(page, "Version SEACE", "Seace 3")
                 
                 for keyword in KEYWORDS_INGENIERIA:
-                    logger.info(f"🚀 Iniciando búsqueda: año={anyo}, keyword='{keyword}'...")
-
-                    # Rellenar el filtro de descripción — Búsqueda dentro del panel usando su sufijo estático (inmune a j_idt)
-                    panel_activo = page.locator('.ui-tabs-panel:visible').first
-                    input_desc = panel_activo.locator('input[id$=":descripcionObjeto"]').first
-                    
-                    # Playwright maneja internamente la espera con fill
-                    await input_desc.fill(keyword, timeout=15000)
-                    await page.wait_for_timeout(2000) # Dejar que el cajón registre el texto visualmente
-
-                    # Buscar — Localiza el botón 'Buscar' explícitamente en el panel visible
-                    btn_buscar = panel_activo.locator('button:has-text("Buscar"), button[id$="btnBuscarSelToken"]').first
                     try:
-                        await btn_buscar.click(force=True)
-                    except Exception:
-                        logger.warning("⚠️ Clic normal falló, usando JavaScript click en botón buscar...")
-                        await btn_buscar.evaluate('node => node.click()')
-                    await esperar_procesamiento(page)
-                    await page.wait_for_load_state("networkidle")
+                        logger.info(f"🚀 Iniciando búsqueda: año={anyo}, keyword='{keyword}'...")
 
-                    pagina = 1
-                    while True:
-                        logger.info(f"📄 [{keyword}] Año {anyo} - Revisando página {pagina}...")
-                        await scanear_resultados(page, keyword, anyo, drive_handler, folder_id)
+                        # Idempotencia: Asegurarse de que el bot esté en el buscador nativo antes de iniciar
+                        if "buscadorPublico.xhtml" not in page.url:
+                            logger.warning(f"🔄 URL corrupta detectada para {keyword}. Forzando restablecimiento de la Pila de Navegación...")
+                            await page.goto("https://prod2.seace.gob.pe/seacebus-uiwd-pub/publico/buscadorPublico.xhtml", wait_until="domcontentloaded")
+                            await page.wait_for_timeout(3000)
+                            
+                            # 1. Recuperar el Tab
+                            btn_tab = page.locator("li[role='tab']:has-text('Buscador de Procedimientos de Selección')").first
+                            await btn_tab.click()
+                            await page.locator("li[role='tab'].ui-state-active:has-text('Buscador de Procedimientos de Selección')").wait_for(state="visible", timeout=5000)
+                            await page.wait_for_timeout(3000)
+                            
+                            # 2. Restaurar los filtros perdidos del año actual
+                            await seleccionar_opcion_primefaces(page, "Objeto de Contratación", "Obra")
+                            await seleccionar_opcion_primefaces(page, "Año de la Convocatoria", str(anyo))
+                            await seleccionar_opcion_primefaces(page, "Version SEACE", "Seace 3")
 
-                        next_btn = page.locator('.ui-paginator-next').first
-                        is_disabled = "ui-state-disabled" in (await next_btn.get_attribute("class") or "")
+                        # Rellenar el filtro de descripción — Búsqueda dentro del panel usando su sufijo estático (inmune a j_idt)
+                        panel_activo = page.locator('.ui-tabs-panel:visible').first
+                        input_desc = panel_activo.locator('input[id$=":descripcionObjeto"]').first
+                        
+                        # Defensivo extremo: Forzar limpieza nativa para despejar la memoria RAM de PrimeFaces
+                        await input_desc.click()
+                        await page.keyboard.press("Control+A")
+                        await page.keyboard.press("Backspace")
+                        await page.wait_for_timeout(500)
+                        # Playwright maneja internamente la espera con fill
+                        await input_desc.fill(keyword, timeout=15000)
+                        await page.wait_for_timeout(2000) # Dejar que el cajón registre el texto visualmente
 
-                        if is_disabled:
-                            break
-
-                        await next_btn.click()
+                        # Buscar — Localiza el botón 'Buscar' explícitamente en el panel visible
+                        btn_buscar = panel_activo.locator('button:has-text("Buscar"), button[id$="btnBuscarSelToken"]').first
+                        try:
+                            await btn_buscar.click(force=True)
+                        except Exception:
+                            logger.warning("⚠️ Clic normal falló, usando JavaScript click en botón buscar...")
+                            await btn_buscar.evaluate('node => node.click()')
                         await esperar_procesamiento(page)
                         await page.wait_for_load_state("networkidle")
-                        pagina += 1
 
-                    logger.info(f"✅ Búsqueda terminada: año={anyo}, keyword='{keyword}'.")
+                        pagina = 1
+                        while True:
+                            logger.info(f"📄 [{keyword}] Año {anyo} - Revisando página {pagina}...")
+                            await scanear_resultados(page, keyword, anyo, drive_handler, folder_id)
 
-        except Exception as e:
-            logger.error(f"Error crítico: {e}")
+                            next_btn = page.locator('.ui-paginator-next').first
+                            is_disabled = "ui-state-disabled" in (await next_btn.get_attribute("class") or "")
+
+                            if is_disabled:
+                                break
+
+                            await next_btn.click()
+                            await esperar_procesamiento(page)
+                            await page.wait_for_load_state("networkidle")
+                            pagina += 1
+
+                    except Exception as loop_e:
+                        logger.error(f"⚠️ Fallo general procesando la keyword '{keyword}': {loop_e}")
+                        # El script simplemente continuará con la próxima keyword, y el chequeo
+                        # de "buscadorPublico" forzará a SEACE a reconstruirse de ser necesario.
+                        continue
+
+        except Exception as global_e:
+            logger.error(f"Error crítico en el esqueleto principal: {global_e}")
         finally:
             await browser.close()
             logger.info("🔒 Auditoría completada.")

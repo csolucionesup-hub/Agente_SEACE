@@ -35,7 +35,7 @@ Si no es claro, responde 'NOT_FOUND'.
 """
         try:
             response = await self.client.aio.models.generate_content(
-                model='gemini-2.0-flash',
+                model='gemini-1.5-flash',
                 contents=prompt
             )
             result = response.text.strip()
