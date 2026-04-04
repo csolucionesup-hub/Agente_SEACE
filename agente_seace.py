@@ -84,27 +84,42 @@ async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text
             f"seleccionar la opción '{option_text}' en el menú desplegable cuyo label dice '{label_text}'"
         )
 
-async def capturar_y_subir(page: Page, texto_proyecto: str, year: int, drive_handler: GDriveHandler, folder_id: str):
-    """Genera una captura completa de la Ficha de Selección y la sube."""
+async def capturar_ficha_seace(page: Page, texto_proyecto: str, year: int, drive_handler: GDriveHandler, folder_id: str):
+    """Espera el renderizado completo de la ficha y toma la captura."""
     try:
+        # 1. Espera de Seguridad: Verificamos que el cronograma cargó
+        await page.wait_for_selector('text="Cronograma"', state="visible", timeout=30000)
+        
+        # 2. Pequeña pausa para que PrimeFaces termine las animaciones de tablas
+        await page.wait_for_timeout(2000)
+        
+        # 3. Generar nombre de archivo único
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_text = "".join([c if c.isalnum() else "_" for c in texto_proyecto[:20]])
-        filename = f"Ficha_{year}_{safe_text}_{timestamp}.png"
+        safe_name = "".join([c if c.isalnum() else "_" for c in texto_proyecto[:30]])
+        filename = f"FICHA_{year}_{safe_name}_{timestamp}.png"
         filepath = os.path.join(os.getcwd(), filename)
         
-        # Realizar captura de toda la página de manera limpia (full page)
+        # 4. CAPTURA FULL PAGE: Esto asegura que se vea toda la ficha
         await page.screenshot(path=filepath, full_page=True)
-        logger.info(f"📸 Captura de Ficha guardada localmente: {filename}")
+        logger.info(f"📸 Captura de ficha realizada localmente: {filename}")
 
-        # Subir a Drive si el handler está listo
+        # 5. Subida inmediata a Google Drive
         if drive_handler and folder_id:
-            drive_handler.upload_file(filepath, folder_id)
-            # Opcional: borrar local después de subir
-            # os.remove(filepath)
+            file_id = drive_handler.upload_file(filepath, folder_id)
+            if file_id:
+                logger.info(f"🚀 Respaldado en Drive con ID: {file_id}")
+                os.remove(filepath)  # Limpieza local automática
+        
+        # 6. Regresar a la lista de resultados
+        await page.locator('button:has-text("Regresar"), a:has-text("Regresar")').first.click(force=True)
+        await esperar_procesamiento(page)
+        # Esperar a que la tabla principal vuelva a ser visible
+        await page.wait_for_selector('tbody[id$="dtProcesos_data"]', state="visible", timeout=30000)
+        await page.wait_for_timeout(1000)
         
         return True
     except Exception as e:
-        logger.error(f"Error en capturar_y_subir: {e}")
+        logger.error(f"❌ Error al capturar la ficha: {e}")
         return False
 
 async def scanear_resultados(page: Page, year: int, drive_handler: GDriveHandler, folder_id: str):
@@ -143,20 +158,14 @@ async def scanear_resultados(page: Page, year: int, drive_handler: GDriveHandler
                     logger.info(f"📅 Clic en Icono de Calendario (Ficha) para: {texto_fila[:40]}...")
                     await btn_ficha.click(force=True)
 
-                    # Esperamos que cargue la ficha verificando un texto único de esa vista (como 'Regresar' o 'Cronograma')
+                    # La validación 'Regresar' se mantiene como señal de que llegamos a la Ficha
                     await page.wait_for_selector('text="Regresar"', state="visible", timeout=30000)
-                    await page.wait_for_timeout(1000)
 
-                    await capturar_y_subir(page, texto_fila, year, drive_handler, folder_id)
+                    # La función capturar_ficha_seace se encarga de esperar el cronograma, capturar y regresar
+                    await capturar_ficha_seace(page, texto_fila, year, drive_handler, folder_id)
                 else:
                     logger.warning(f"⚠️ No se encontró el icono de Ficha en la fila: {texto_fila[:40]}...")
                     continue
-
-                # Volver a resultados
-                await page.locator('text="Regresar"').first.click(force=True)
-                await esperar_procesamiento(page)
-                await page.wait_for_selector(row_selector, state="visible", timeout=30000)
-                await page.wait_for_timeout(2000)
 
                 encontrado_en_esta_pagina = True
 
