@@ -95,17 +95,20 @@ async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text
 
 async def capturar_ficha_seace(page: Page, keyword: str, institucion: str, year: int, drive_handler: GDriveHandler, folder_id: str):
     """Espera el renderizado completo de la ficha y toma la captura."""
+    profundidad = 0
     try:
         # 1. Navegación Profunda: Entrar a la Ficha desde el Historial Intermedio
         # SEACE usa una estructura anidada: Buscador -> Historial -> Ficha
         await page.wait_for_selector('text="Visualizar historial de contratación"', state="visible", timeout=15000)
+        profundidad = 1
         
         # Buscar el icono de "Hoja/Documento" en la última columna (Acciones)
         btn_ver_ficha = page.locator('tbody.ui-datatable-data').first.locator('tr').first.locator('td').last.locator('a, img').first
         await btn_ver_ficha.click(force=True)
+        profundidad = 2
         
         # 2. Espera de Seguridad: Verificamos que el cronograma cargó finalmente
-        await page.wait_for_selector('text="Cronograma"', state="visible", timeout=30000)
+        await page.locator(':has-text("Cronograma")').first.wait_for(state="visible", timeout=30000)
         
         # 3. Pausa grande requerida para que PrimeFaces termine de dibujar el Cronograma
         # total y las grillas CSS tras hacer efectiva la navegación por AJAX.
@@ -130,25 +133,31 @@ async def capturar_ficha_seace(page: Page, keyword: str, institucion: str, year:
                 logger.info(f"🚀 Respaldado en Drive con ID: {file_id}")
                 os.remove(filepath)  # Limpieza local automática
         
-        # 6. Primer Regreso (Ficha -> Historial)
-        btn_regresar = page.locator('button:has-text("Regresar"), a:has-text("Regresar"), span:has-text("Regresar")').first
-        await btn_regresar.click(force=True)
-        await page.wait_for_timeout(3000)
-        
-        # 7. Segundo Regreso (Historial -> Buscador Principal)
-        btn_regresar_dos = page.locator('button:has-text("Regresar"), a:has-text("Regresar"), span:has-text("Regresar")').first
-        await btn_regresar_dos.click(force=True)
-        await esperar_procesamiento(page)
-        
-        # Esperar a que la tabla principal (resultados) vuelva a ser visible
-        await page.wait_for_selector('tbody[id$="dtProcesos_data"]', state="visible", timeout=30000)
-        # Darle a la tabla 4 segundos para que refresque visualmente si había un spinner
-        await page.wait_for_timeout(4000)
-        
         return True
     except Exception as e:
         logger.error(f"❌ Error al capturar la ficha: {e}")
         return False
+    finally:
+        try:
+            if profundidad >= 2:
+                # 6. Primer Regreso (Ficha -> Historial)
+                btn_regresar = page.locator('button:has-text("Regresar"), a:has-text("Regresar"), span:has-text("Regresar")').first
+                if await btn_regresar.is_visible():
+                    await btn_regresar.click(force=True)
+                    await page.wait_for_timeout(3000)
+            
+            if profundidad >= 1:
+                # 7. Segundo Regreso (Historial -> Buscador Principal)
+                btn_regresar_dos = page.locator('button:has-text("Regresar"), a:has-text("Regresar"), span:has-text("Regresar")').first
+                if await btn_regresar_dos.is_visible():
+                    await btn_regresar_dos.click(force=True)
+                    await esperar_procesamiento(page)
+                
+                # Esperar a que la tabla principal (resultados) vuelva a ser visible
+                await page.wait_for_selector('tbody[id$="dtProcesos_data"]', state="visible", timeout=30000)
+                await page.wait_for_timeout(4000)
+        except Exception as pop_err:
+            logger.error(f"⚠️ Fallo crítico al intentar retroceder capas: {pop_err}")
 
 async def scanear_resultados(page: Page, keyword: str, year: int, drive_handler: GDriveHandler, folder_id: str):
     """Escanea la tabla y gestiona hallazgos."""
