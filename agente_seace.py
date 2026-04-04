@@ -4,6 +4,7 @@ import os
 import datetime
 from playwright.async_api import async_playwright, Page
 from google_drive_handler import GDriveHandler
+from ia_helper import consultar_ia_sobre_dom
 
 # Configuración de logging
 logging.basicConfig(
@@ -23,9 +24,9 @@ async def esperar_procesamiento(page: Page):
         pass  # Si no aparece el overlay, no hay problema
 
 async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text: str):
-    """Selección ultra-robusta para componentes PrimeFaces."""
+    """Selección ultra-robusta para componentes PrimeFaces con fallback de IA."""
     try:
-        # Localizamos el contenedor del dropdown basado en el texto del label cercano
+        # Estrategia principal: localizar el contenedor del dropdown por label cercano
         container = page.locator("div.ui-selectonemenu").filter(
             has=page.locator(f"xpath=ancestor::tr//label[contains(text(), '{label_text}')]")
         ).first
@@ -33,11 +34,9 @@ async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text
         trigger = container.locator(".ui-selectonemenu-trigger")
         await trigger.click()
 
-        # Esperar al panel específico que se hizo visible
         panel_selector = "div.ui-selectonemenu-panel[style*='display: block']"
         await page.wait_for_selector(panel_selector, state="visible")
 
-        # Seleccionar la opción con texto exacto
         await page.locator(f"{panel_selector} li.ui-selectonemenu-item").filter(
             has_text=option_text
         ).first.click()
@@ -45,8 +44,29 @@ async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text
         await esperar_procesamiento(page)
         logger.info(f"✅ Seleccionado '{option_text}' en '{label_text}'")
         return True
+
     except Exception as e:
-        logger.error(f"❌ Error en PrimeFaces ({label_text}): {e}")
+        logger.warning(f"⚠️ Selector principal falló para '{label_text}': {e}")
+        logger.info("🤖 Activando fallback de IA (Gemini)...")
+        try:
+            # Pasar el HTML del formulario a Gemini para que sugiera el selector correcto
+            html_form = await page.locator("form").first.inner_html()
+            tarea = f"Hacer clic en el trigger del dropdown cuyo label dice '{label_text}'"
+            selector_ia = await consultar_ia_sobre_dom(html_form, tarea)
+
+            if selector_ia:
+                await page.click(selector_ia, force=True)
+                panel_selector = "div.ui-selectonemenu-panel[style*='display: block']"
+                await page.wait_for_selector(panel_selector, state="visible")
+                await page.locator(f"{panel_selector} li.ui-selectonemenu-item").filter(
+                    has_text=option_text
+                ).first.click()
+                await esperar_procesamiento(page)
+                logger.info(f"✅ [IA] Seleccionado '{option_text}' en '{label_text}'")
+                return True
+        except Exception as e_ia:
+            logger.error(f"❌ Fallback de IA también falló ({label_text}): {e_ia}")
+
         return False
 
 async def capturar_y_subir(page: Page, texto_proyecto: str, year: int, drive_handler: GDriveHandler, folder_id: str):
