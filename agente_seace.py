@@ -17,11 +17,12 @@ logger = logging.getLogger(__name__)
 KEYWORDS = ["puente", "pilotes", "cimentación profunda", "muro pantalla"]
 
 async def esperar_procesamiento(page: Page):
-    """Espera a que el indicador de carga de PrimeFaces desaparezca."""
+    """Espera a que los indicadores de carga de PrimeFaces desaparezcan."""
     try:
         await page.wait_for_selector(".ui-blockui", state="hidden", timeout=10000)
+        await page.wait_for_selector(".status-dialog", state="hidden", timeout=10000)
     except:
-        pass  # Si no aparece el overlay, no hay problema
+        pass  # Si no aparecen, continuamos
 
 async def clic_con_vision_ia(page: Page, tarea_objetivo: str) -> bool:
     """
@@ -177,14 +178,25 @@ async def ejecutar_agente():
         page = await context.new_page()
 
         try:
+            TIMEOUT_PORTAL = 45000 
             logger.info("🤖 Iniciando navegación al SEACE...")
             await page.goto("https://prod2.seace.gob.pe/seacebus-uiwd-pub/publico/buscadorPublico.xhtml", 
-                          wait_until="networkidle", timeout=60000)
-            await page.click('a:has-text("Buscador de Procedimientos de Selección")')
-            await page.wait_for_selector('div[id$="tab1"][aria-hidden="false"]', timeout=15000)
-            # Esperar al panel principal del buscador y a que PrimeFaces termine de renderizar
-            await page.wait_for_selector('div[id$="idPanelBusquedaProceso"]', state="visible", timeout=15000)
-            await page.wait_for_timeout(1500)
+                          wait_until="networkidle", timeout=TIMEOUT_PORTAL)
+            
+            try:
+                await page.click('a:has-text("Buscador de Procedimientos de Selección")', force=True)
+                await page.wait_for_selector('div[id$="tab1"][aria-hidden="false"]', timeout=15000)
+                # Esperar al panel principal del buscador y a que PrimeFaces termine de renderizar
+                await page.wait_for_selector('form[id$="frmBuscar"], div[id$="idPanelBusquedaProceso"]', state="visible", timeout=TIMEOUT_PORTAL)
+                await page.wait_for_timeout(1500)
+                logger.info("✅ Panel de búsqueda detectado.")
+            except Exception as nav_e:
+                logger.error(f"❌ No se pudo cargar el buscador por vía normal: {nav_e}")
+                # Entramos a la capa de visión IA de ser necesario
+                await clic_con_vision_ia(page, "el botón o pestaña para abrir el buscador de procedimientos de selección")
+                await page.wait_for_selector('form[id$="frmBuscar"], div[id$="idPanelBusquedaProceso"]', state="visible", timeout=TIMEOUT_PORTAL)
+                await page.wait_for_timeout(1500)
+                logger.info("✅ Panel de búsqueda detectado vía IA.")
 
             anyo_inicial = 2025
             anyo_actual = datetime.datetime.now().year
