@@ -73,6 +73,11 @@ async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text
         await page.locator(f"{panel_selector} li.ui-selectonemenu-item:text-is('{option_text}')").first.click()
 
         await esperar_procesamiento(page)
+        # TRUCO SENIOR: PrimeFaces tarda un milisegundo en despachar el Ajax que borra el DOM. 
+        # Si no esperamos fijamente aquí, Playwright intentará ubicar el siguiente cuadro de texto y...
+        # ...luego PrimeFaces lo borrará por debajo, dejando a Playwright en un timeout eterno.
+        await page.wait_for_timeout(2000)
+        
         logger.info(f"✅ Seleccionado '{option_text}' en '{label_text}'")
         return True
 
