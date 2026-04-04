@@ -86,7 +86,7 @@ async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text
             f"seleccionar la opción '{option_text}' en el menú desplegable cuyo label dice '{label_text}'"
         )
 
-async def capturar_ficha_seace(page: Page, texto_proyecto: str, year: int, drive_handler: GDriveHandler, folder_id: str):
+async def capturar_ficha_seace(page: Page, keyword: str, institucion: str, year: int, drive_handler: GDriveHandler, folder_id: str):
     """Espera el renderizado completo de la ficha y toma la captura."""
     try:
         # 1. Espera de Seguridad: Verificamos que el cronograma cargó
@@ -128,13 +128,14 @@ async def capturar_ficha_seace(page: Page, texto_proyecto: str, year: int, drive
         logger.error(f"❌ Error al capturar la ficha: {e}")
         return False
 
-async def scanear_resultados(page: Page, year: int, drive_handler: GDriveHandler, folder_id: str):
+async def scanear_resultados(page: Page, keyword: str, year: int, drive_handler: GDriveHandler, folder_id: str):
     """Escanea la tabla y gestiona hallazgos."""
     try:
         table_selector = 'tbody[id$="dtProcesos_data"]'
         row_selector = f'{table_selector} tr.ui-widget-content'
 
-        # TIP SENIOR: Verificación temprana de tabla vacía antes de iterar
+        # TIP SENIOR: Esperar un momento a que el AJAX dibuje los resultados o el mensaje de vacío
+        await page.wait_for_timeout(1500)
         empty_msg = page.locator('td.ui-datatable-empty-message')
         if await empty_msg.is_visible():
             logger.info("ℹ️ No se encontraron resultados en esta página.")
@@ -164,11 +165,14 @@ async def scanear_resultados(page: Page, year: int, drive_handler: GDriveHandler
                     logger.info(f"📅 Clic en Icono de Calendario (Ficha) para: {texto_fila[:40]}...")
                     await btn_ficha.click(force=True)
 
+                    # Obtener la Institución (usualmente en la segunda columna)
+                    institucion_texto = await fila.locator('td').nth(1).inner_text()
+
                     # La validación 'Regresar' se mantiene como señal de que llegamos a la Ficha
                     await page.wait_for_selector('text="Regresar"', state="visible", timeout=30000)
 
                     # La función capturar_ficha_seace se encarga de esperar el cronograma, capturar y regresar
-                    await capturar_ficha_seace(page, texto_fila, year, drive_handler, folder_id)
+                    await capturar_ficha_seace(page, keyword, institucion_texto, year, drive_handler, folder_id)
                 else:
                     logger.warning(f"⚠️ No se encontró el icono de Ficha en la fila: {texto_fila[:40]}...")
                     continue
@@ -233,15 +237,14 @@ async def ejecutar_agente():
             anyo_actual = datetime.datetime.now().year
 
             for anyo in range(anyo_inicial, anyo_actual + 1):
+                logger.info(f"📅 Configurando parámetros fijos para el año {anyo}...")
+                # Seleccionar parámetros fijos por año
+                await seleccionar_opcion_primefaces(page, "Objeto de Contratación", "Obra")
+                await seleccionar_opcion_primefaces(page, "Año de la Convocatoria", str(anyo))
+                await seleccionar_opcion_primefaces(page, "Version SEACE", "Seace 3")
+                
                 for keyword in KEYWORDS_INGENIERIA:
                     logger.info(f"🚀 Iniciando búsqueda: año={anyo}, keyword='{keyword}'...")
-
-                    # Seleccionar parámetros de búsqueda
-                    await seleccionar_opcion_primefaces(page, "Objeto de Contratación", "Obra")
-                    await seleccionar_opcion_primefaces(page, "Año de la Convocatoria", str(anyo))
-                    
-                    # PASO 3: Ver que la versión del SEACE sea la versión 3
-                    await seleccionar_opcion_primefaces(page, "Version SEACE", "Seace 3")
 
                     # Rellenar el filtro de descripción — Búsqueda dentro del panel usando su sufijo estático (inmune a j_idt)
                     panel_activo = page.locator('.ui-tabs-panel:visible').first
@@ -263,7 +266,7 @@ async def ejecutar_agente():
                     pagina = 1
                     while True:
                         logger.info(f"📄 [{keyword}] Año {anyo} - Revisando página {pagina}...")
-                        await scanear_resultados(page, anyo, drive_handler, folder_id)
+                        await scanear_resultados(page, keyword, anyo, drive_handler, folder_id)
 
                         next_btn = page.locator('.ui-paginator-next').first
                         is_disabled = "ui-state-disabled" in (await next_btn.get_attribute("class") or "")
