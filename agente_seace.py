@@ -4,7 +4,7 @@ import os
 import datetime
 from playwright.async_api import async_playwright, Page
 from google_drive_handler import GDriveHandler
-from ia_helper import consultar_ia_sobre_dom
+from ia_helper import cerebro_ia
 
 # Configuración de logging
 logging.basicConfig(
@@ -47,12 +47,16 @@ async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text
 
     except Exception as e:
         logger.warning(f"⚠️ Selector principal falló para '{label_text}': {e}")
+
+        if cerebro_ia is None:
+            logger.warning("🤖 Fallback de IA no disponible (sin API Key).")
+            return False
+
         logger.info("🤖 Activando fallback de IA (Gemini)...")
         try:
-            # Pasar el HTML del formulario a Gemini para que sugiera el selector correcto
             html_form = await page.locator("form").first.inner_html()
-            tarea = f"Hacer clic en el trigger del dropdown cuyo label dice '{label_text}'"
-            selector_ia = await consultar_ia_sobre_dom(html_form, tarea)
+            objetivo = f"Hacer clic en el trigger del dropdown cuyo label dice '{label_text}'"
+            selector_ia = await cerebro_ia.razonar_selector(html_form, objetivo)
 
             if selector_ia:
                 await page.click(selector_ia, force=True)
