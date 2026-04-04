@@ -34,7 +34,7 @@ async def clic_con_vision_ia(page: Page, tarea_objetivo: str) -> bool:
         return False
     try:
         logger.info(f"🧠 Consultando a Gemini para: {tarea_objetivo}...")
-        html_contexto = await page.locator("form").inner_html()
+        html_contexto = await page.locator("body").inner_html()
         nuevo_selector = await cerebro_ia.razonar_selector(html_contexto, tarea_objetivo)
 
         if nuevo_selector:
@@ -207,17 +207,20 @@ async def ejecutar_agente():
             await page.wait_for_timeout(3000)
             
             try:
-                await page.click('a:has-text("Buscador de Procedimientos de Selección")', force=True)
-                await page.wait_for_selector('div[id$="tab1"][aria-hidden="false"]', timeout=15000)
-                # Esperar al panel principal del buscador y a que PrimeFaces termine de renderizar
-                await page.wait_for_selector('form[id$="frmBuscar"], div[id$="idPanelBusquedaProceso"]', state="visible", timeout=TIMEOUT_PORTAL)
+                # Filtrar el clic para tomar el tab explícito usando la clase CSS de PrimeFaces o nth(0)
+                btn_tab = page.locator('a:has-text("Buscador de Procedimientos de Selección")').first
+                await btn_tab.click(force=True)
+                
+                # Esperar al panel principal observando de forma estructural que carguen los campos clave
+                # Usamos el label que sabemos que existe en ese panel
+                await page.wait_for_selector('label:has-text("Objeto de Contratación")', state="visible", timeout=TIMEOUT_PORTAL)
                 await page.wait_for_timeout(1500)
                 logger.info("✅ Panel de búsqueda detectado.")
             except Exception as nav_e:
                 logger.error(f"❌ No se pudo cargar el buscador por vía normal: {nav_e}")
                 # Entramos a la capa de visión IA de ser necesario
                 await clic_con_vision_ia(page, "el botón o pestaña para abrir el buscador de procedimientos de selección")
-                await page.wait_for_selector('form[id$="frmBuscar"], div[id$="idPanelBusquedaProceso"]', state="visible", timeout=TIMEOUT_PORTAL)
+                await page.wait_for_selector('label:has-text("Objeto de Contratación")', state="visible", timeout=TIMEOUT_PORTAL)
                 await page.wait_for_timeout(1500)
                 logger.info("✅ Panel de búsqueda detectado vía IA.")
 
@@ -231,6 +234,9 @@ async def ejecutar_agente():
                     # Seleccionar parámetros de búsqueda
                     await seleccionar_opcion_primefaces(page, "Objeto de Contratación", "Obra")
                     await seleccionar_opcion_primefaces(page, "Año de la Convocatoria", str(anyo))
+                    
+                    # PASO 3: Ver que la versión del SEACE sea la versión 3
+                    await seleccionar_opcion_primefaces(page, "Version SEACE", "Seace 3")
 
                     # Rellenar el filtro de descripción — :visible evita escribir en el campo oculto de PrimeFaces
                     input_desc = page.locator('input[id$="descripcionObjeto"]:visible').first
