@@ -238,18 +238,18 @@ async def ejecutar_agente():
                     # PASO 3: Ver que la versión del SEACE sea la versión 3
                     await seleccionar_opcion_primefaces(page, "Version SEACE", "Seace 3")
 
-                    # Rellenar el filtro de descripción — :visible evita escribir en el campo oculto de PrimeFaces
-                    input_desc = page.locator('input[id$="descripcionObjeto"]:visible').first
-                    await input_desc.wait_for(state="visible")
-                    await input_desc.fill(keyword)
+                    # Rellenar el filtro de descripción — se usa el ID exacto de la pestaña 2 para evitar colisión con ACF
+                    input_desc = page.locator('input[id$="idFormBuscarProceso:descripcionObjeto"]')
+                    await input_desc.first.wait_for(state="visible")
+                    await input_desc.first.fill(keyword)
 
                     # Buscar — usa JS click como fallback si el botón aparece deshabilitado
-                    btn_buscar = page.locator('button[id$="btnBuscarSelToken"]')
+                    btn_buscar = page.locator('button[id$="idFormBuscarProceso:btnBuscarSelToken"]')
                     try:
                         await btn_buscar.click(force=True)
                     except Exception:
                         logger.warning("⚠️ Clic normal falló, usando JavaScript click en botón buscar...")
-                        await page.evaluate('document.querySelector("[id$=\'btnBuscarSelToken\']").click()')
+                        await page.evaluate('document.querySelector("[id$=\'idFormBuscarProceso:btnBuscarSelToken\']").click()')
                     await esperar_procesamiento(page)
                     await page.wait_for_load_state("networkidle")
 
