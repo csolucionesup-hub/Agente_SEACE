@@ -1,6 +1,10 @@
 import os
 import logging
 import google.generativeai as genai
+from dotenv import load_dotenv
+
+# Carga automática del archivo .env local
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
