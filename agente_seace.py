@@ -51,10 +51,10 @@ async def clic_con_vision_ia(page: Page, tarea_objetivo: str) -> bool:
 async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text: str):
     """Selección semántica label → tr → dropdown, con fallback de IA."""
     try:
-        # Paso 1: Restringimos la búsqueda EXCLUSIVAMENTE al formulario activo (idFormBuscarProceso)
-        # Esto evita atrapar los dropdowns ocultos de la pestaña paralela (ACF)
-        form_activo = page.locator('form[id$="idFormBuscarProceso"]')
-        fila_label = form_activo.locator(
+        # Paso 1: Restringimos la búsqueda EXCLUSIVAMENTE al panel de pestaña visible 
+        # Esto evita atrapar los dropdowns ocultos de la pestaña paralela (ACF) y es inmune a IDs como j_idt
+        panel_activo = page.locator('.ui-tabs-panel:visible').first
+        fila_label = panel_activo.locator(
             f"xpath=descendant::*[contains(text(), '{label_text}')]/ancestor::tr[1]"
         ).first
         container = fila_label.locator("div.ui-selectonemenu").first
@@ -240,18 +240,21 @@ async def ejecutar_agente():
                     # PASO 3: Ver que la versión del SEACE sea la versión 3
                     await seleccionar_opcion_primefaces(page, "Version SEACE", "Seace 3")
 
-                    # Rellenar el filtro de descripción — se usa el ID exacto de la pestaña 2 para evitar colisión con ACF
-                    input_desc = page.locator('input[id$="idFormBuscarProceso:descripcionObjeto"]')
+                    # Rellenar el filtro de descripción — Búsqueda estructural inmune a IDs (usando panel activo + label)
+                    panel_activo = page.locator('.ui-tabs-panel:visible').first
+                    fila_desc = panel_activo.locator('xpath=descendant::*[contains(text(), "Descripción del Objeto")]/ancestor::tr[1]').first
+                    input_desc = fila_desc.locator('input[type="text"]')
+                    
                     await input_desc.first.wait_for(state="visible")
                     await input_desc.first.fill(keyword)
 
-                    # Buscar — usa JS click como fallback si el botón aparece deshabilitado
-                    btn_buscar = page.locator('button[id$="idFormBuscarProceso:btnBuscarSelToken"]')
+                    # Buscar — Localiza el botón 'Buscar' explícitamente en el panel visible
+                    btn_buscar = panel_activo.locator('button:has-text("Buscar"), button[id$="btnBuscarSelToken"]').first
                     try:
                         await btn_buscar.click(force=True)
                     except Exception:
                         logger.warning("⚠️ Clic normal falló, usando JavaScript click en botón buscar...")
-                        await page.evaluate('document.querySelector("[id$=\'idFormBuscarProceso:btnBuscarSelToken\']").click()')
+                        await btn_buscar.evaluate('node => node.click()')
                     await esperar_procesamiento(page)
                     await page.wait_for_load_state("networkidle")
 
