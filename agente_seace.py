@@ -14,7 +14,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Palabras clave a buscar en el portal SEACE
-KEYWORDS = ["puente", "pilotes", "cimentación profunda", "muro pantalla"]
+KEYWORDS_INGENIERIA = ["PUENTE", "PILOTES", "CIMENTACION", "MURO PANTALLA", "VIADUCTO"]
 
 async def esperar_procesamiento(page: Page):
     """Espera a que los indicadores de carga de PrimeFaces desaparezcan."""
@@ -129,8 +129,10 @@ async def scanear_resultados(page: Page, year: int, drive_handler: GDriveHandler
             fila = page.locator(row_selector).nth(i)
 
             texto_fila = await fila.inner_text()
-            if len(texto_fila.strip()) > 10:
-                logger.info(f"🌉 ENTRANDO A FICHA: {texto_fila.strip()[:60]}...")
+            texto_proyecto = texto_fila.upper()
+            
+            if any(key in texto_proyecto for key in KEYWORDS_INGENIERIA) and len(texto_fila.strip()) > 10:
+                logger.info(f"🎯 Hallazgo relevante: {texto_proyecto[:50]}...")
 
                 # Clic en el botón "Ver Ficha de Selección" (2do icono en 'Acciones')
                 btn_ficha = fila.locator('td').last.locator('a, button').nth(1)
@@ -180,8 +182,10 @@ async def ejecutar_agente():
         try:
             TIMEOUT_PORTAL = 45000 
             logger.info("🤖 Iniciando navegación al SEACE...")
+            # Cambiado a domcontentloaded y pausa manual para PrimeFaces
             await page.goto("https://prod2.seace.gob.pe/seacebus-uiwd-pub/publico/buscadorPublico.xhtml", 
-                          wait_until="networkidle", timeout=TIMEOUT_PORTAL)
+                          wait_until="domcontentloaded", timeout=TIMEOUT_PORTAL)
+            await page.wait_for_timeout(3000)
             
             try:
                 await page.click('a:has-text("Buscador de Procedimientos de Selección")', force=True)
@@ -202,7 +206,7 @@ async def ejecutar_agente():
             anyo_actual = datetime.datetime.now().year
 
             for anyo in range(anyo_inicial, anyo_actual + 1):
-                for keyword in KEYWORDS:
+                for keyword in KEYWORDS_INGENIERIA:
                     logger.info(f"🚀 Iniciando búsqueda: año={anyo}, keyword='{keyword}'...")
 
                     # Seleccionar parámetros de búsqueda
