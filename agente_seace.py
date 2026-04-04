@@ -31,15 +31,17 @@ async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text
             has=page.locator(f"xpath=ancestor::tr//label[contains(text(), '{label_text}')]")
         ).first
 
+        # Scroll para asegurar visibilidad y evitar capas transparentes
+        await container.scroll_into_view_if_needed()
         trigger = container.locator(".ui-selectonemenu-trigger")
-        await trigger.click()
+        await trigger.click(force=True)  # force=True ignora overlays de PrimeFaces
 
-        panel_selector = "div.ui-selectonemenu-panel[style*='display: block']"
-        await page.wait_for_selector(panel_selector, state="visible")
-
-        await page.locator(f"{panel_selector} li.ui-selectonemenu-item").filter(
-            has_text=option_text
-        ).first.click()
+        # Panel visible por atributo de estilo (más confiable que :visible en Playwright)
+        panel = page.locator("div.ui-selectonemenu-panel").filter(
+            has=page.locator("li.ui-selectonemenu-item")
+        ).last
+        await panel.wait_for(state="visible", timeout=10000)
+        await panel.locator("li.ui-selectonemenu-item").filter(has_text=option_text).first.click(force=True)
 
         await esperar_procesamiento(page)
         logger.info(f"✅ Seleccionado '{option_text}' en '{label_text}'")
@@ -189,8 +191,13 @@ async def ejecutar_agente():
                     await page.wait_for_selector(input_desc_selector, state="visible")
                     await page.fill(input_desc_selector, keyword, force=True)
 
-                    # Buscar y esperar respuesta AJAX de PrimeFaces
-                    await page.click('button[id$="btnBuscarSelToken"]', force=True)
+                    # Buscar — usa JS click como fallback si el botón aparece deshabilitado
+                    btn_buscar = page.locator('button[id$="btnBuscarSelToken"]')
+                    try:
+                        await btn_buscar.click(force=True)
+                    except Exception:
+                        logger.warning("⚠️ Clic normal falló, usando JavaScript click en botón buscar...")
+                        await page.evaluate('document.querySelector("[id$=\'btnBuscarSelToken\']").click()')
                     await esperar_procesamiento(page)
                     await page.wait_for_load_state("networkidle")
 
