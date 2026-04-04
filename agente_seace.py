@@ -214,20 +214,21 @@ async def ejecutar_agente():
             await page.wait_for_timeout(3000)
             
             try:
-                # Filtrar el clic para tomar el tab explícito usando la clase CSS de PrimeFaces o nth(0)
-                btn_tab = page.locator('a:has-text("Buscador de Procedimientos de Selección")').first
+                # Filtrar el clic para tomar el tab explícito usando el rol seguro de PrimeFaces
+                btn_tab = page.locator("li[role='tab']:has-text('Buscador de Procedimientos de Selección')").first
                 await btn_tab.click(force=True)
                 
-                # Esperar al panel principal observando de forma estructural que carguen los campos clave
-                # Usamos locator().first.wait_for para evitar errores de Strict Mode ("resolved to 2 elements")
-                await page.locator("input[id$='idFormBuscarProceso:descripcionObjeto']").first.wait_for(state="visible", timeout=TIMEOUT_PORTAL)
+                # Esperamos a que el panel estructural cambie a visible mediante su etiqueta
+                panel_activo = page.locator('.ui-tabs-panel:visible').first
+                await panel_activo.locator('xpath=descendant::*[contains(text(), "Objeto de Contratación")]').first.wait_for(state="visible", timeout=TIMEOUT_PORTAL)
                 await page.wait_for_timeout(1500)
                 logger.info("✅ Panel de búsqueda detectado.")
             except Exception as nav_e:
                 logger.error(f"❌ No se pudo cargar el buscador por vía normal: {nav_e}")
                 # Entramos a la capa de visión IA de ser necesario
                 await clic_con_vision_ia(page, "el botón o pestaña para abrir el buscador de procedimientos de selección")
-                await page.locator("input[id$='idFormBuscarProceso:descripcionObjeto']").first.wait_for(state="visible", timeout=TIMEOUT_PORTAL)
+                panel_activo = page.locator('.ui-tabs-panel:visible').first
+                await panel_activo.locator('xpath=descendant::*[contains(text(), "Objeto de Contratación")]').first.wait_for(state="visible", timeout=TIMEOUT_PORTAL)
                 await page.wait_for_timeout(1500)
                 logger.info("✅ Panel de búsqueda detectado vía IA.")
 
