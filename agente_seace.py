@@ -101,17 +101,18 @@ async def capturar_ficha_seace(page: Page, keyword: str, institucion: str, year:
         # SEACE usa una estructura anidada: Buscador -> Historial -> Ficha
         await page.wait_for_selector('text="Visualizar historial de contratación"', state="visible", timeout=15000)
         profundidad = 1
+        # El renderizado de PrimeFaces requiere asentar los eventos (Hydration) antes del clic
+        await page.wait_for_timeout(3000)
         
         # Buscar el icono de "Hoja/Documento" en la última columna (Acciones)
         btn_ver_ficha = page.locator('tbody.ui-datatable-data').first.locator('tr').first.locator('td').last.locator('a, img').first
-        await btn_ver_ficha.click(force=True)
-        profundidad = 2
+        await btn_ver_ficha.click(timeout=10000)
         
         # 2. Espera de Seguridad: Verificamos que el cronograma cargó finalmente
         await page.locator(':has-text("Cronograma")').first.wait_for(state="visible", timeout=30000)
+        profundidad = 2 # Declaramos nivel 2 únicamente si el DOM del Cronograma existe
         
         # 3. Pausa grande requerida para que PrimeFaces termine de dibujar el Cronograma
-        # total y las grillas CSS tras hacer efectiva la navegación por AJAX.
         await page.wait_for_timeout(5000)
         
         # 3. Generar nombre de archivo con orden exacto: PALABRA_CLAVE + FECHA + ENTIDAD
