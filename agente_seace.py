@@ -51,11 +51,12 @@ async def clic_con_vision_ia(page: Page, tarea_objetivo: str) -> bool:
 async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text: str):
     """Selección semántica label → tr → dropdown, con fallback de IA."""
     try:
-        # Paso 1: Localizar la fila (<tr>) que contiene el texto de la etiqueta
-        # Cambiado a //*[contains(text()...)] porque PrimeFaces a menudo usa <td> en lugar de <label>
-        fila_label = page.locator(
-            f"xpath=//*[contains(text(), '{label_text}')]/ancestor::tr[1]"
-        )
+        # Paso 1: Restringimos la búsqueda EXCLUSIVAMENTE al formulario activo (idFormBuscarProceso)
+        # Esto evita atrapar los dropdowns ocultos de la pestaña paralela (ACF)
+        form_activo = page.locator('form[id$="idFormBuscarProceso"]')
+        fila_label = form_activo.locator(
+            f"xpath=descendant::*[contains(text(), '{label_text}')]/ancestor::tr[1]"
+        ).first
         container = fila_label.locator("div.ui-selectonemenu").first
 
         # Paso 2: Asegurarnos que es visible y hacer scroll antes de cualquier clic
