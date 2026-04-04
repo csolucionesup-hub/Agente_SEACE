@@ -128,7 +128,7 @@ async def ejecutar_agente():
     if os.path.exists('credentials.json'):
         try:
             drive_handler = GDriveHandler()
-            folder_id = drive_handler.create_folder(f"SEACE_Proyectos_{datetime.datetime.now().strftime('%Y-%m-%d')}")
+            folder_id = drive_handler.get_or_create_folder(f"SEACE_Proyectos_{datetime.datetime.now().strftime('%Y-%m-%d')}")
         except Exception as e:
             logger.error(f"No se pudo iniciar DriveHandler: {e}")
     else:
