@@ -51,10 +51,10 @@ async def clic_con_vision_ia(page: Page, tarea_objetivo: str) -> bool:
 async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text: str):
     """Selección semántica label → tr → dropdown, con fallback de IA."""
     try:
-        # Paso 1: Localizar la fila (<tr>) que contiene el label buscado
-        # Luego escoger el div.ui-selectonemenu dentro de esa fila — semántico y único
+        # Paso 1: Localizar la fila (<tr>) que contiene el texto de la etiqueta
+        # Cambiado a //*[contains(text()...)] porque PrimeFaces a menudo usa <td> en lugar de <label>
         fila_label = page.locator(
-            f"xpath=//label[contains(text(), '{label_text}')]/ancestor::tr[1]"
+            f"xpath=//*[contains(text(), '{label_text}')]/ancestor::tr[1]"
         )
         container = fila_label.locator("div.ui-selectonemenu").first
 
