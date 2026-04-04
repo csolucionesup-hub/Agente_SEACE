@@ -52,12 +52,19 @@ async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text
     """Selección semántica label → tr → dropdown, con fallback de IA."""
     try:
         # Paso 1: Restringimos la búsqueda EXCLUSIVAMENTE al panel de pestaña visible 
-        # Extraemos la celda contigua exacta (following-sibling::td) para evitar colisiones en filas con múltiples campos
+        # Extraemos el contenedor principal de la celda contigua (following-sibling::td)
         panel_activo = page.locator('.ui-tabs-panel:visible').first
-        trigger_locator = panel_activo.locator(
+        dropdown_container = panel_activo.locator(
             f"xpath=descendant::td[contains(., '{label_text}')]/following-sibling::td[1]//div[contains(@class, 'ui-selectonemenu')]"
-        ).first.locator(".ui-selectonemenu-trigger")
+        ).first
 
+        # TIP SENIOR: Evitar re-ejecutar AJAX si la opción ya está seleccionada visualmente
+        current_label = await dropdown_container.locator('label').first.inner_text()
+        if option_text.lower() in current_label.lower():
+            logger.info(f"✅ '{label_text}' ya está en '{option_text}', no se requiere AJAX.")
+            return
+
+        trigger_locator = dropdown_container.locator(".ui-selectonemenu-trigger")
         await trigger_locator.scroll_into_view_if_needed()
 
         # Paso 3: Abrir el panel con force=True para ignorar overlays de PrimeFaces
