@@ -66,12 +66,11 @@ async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text
         # Paso 3: Abrir el panel con force=True para ignorar overlays de PrimeFaces
         await container.locator(".ui-selectonemenu-trigger").click(force=True)
 
-        # Paso 4: Esperar el panel flotante y seleccionar la opción
+        # Paso 4: Esperar el panel flotante y seleccionar la opción con coincidencia EXACTA
         panel_selector = "div.ui-selectonemenu-panel:visible"
         await page.wait_for_selector(panel_selector, state="visible", timeout=5000)
-        await page.locator(f"{panel_selector} li.ui-selectonemenu-item").filter(
-            has_text=option_text
-        ).first.click()
+        # Usamos :text-is para asegurar coincidencia exacta ('Obra' vs 'Consultoría de Obra')
+        await page.locator(f"{panel_selector} li.ui-selectonemenu-item:text-is('{option_text}')").first.click()
 
         await esperar_procesamiento(page)
         logger.info(f"✅ Seleccionado '{option_text}' en '{label_text}'")
@@ -94,10 +93,12 @@ async def capturar_ficha_seace(page: Page, texto_proyecto: str, year: int, drive
         # 2. Pequeña pausa para que PrimeFaces termine las animaciones de tablas
         await page.wait_for_timeout(2000)
         
-        # 3. Generar nombre de archivo único
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_name = "".join([c if c.isalnum() else "_" for c in texto_proyecto[:30]])
-        filename = f"FICHA_{year}_{safe_name}_{timestamp}.png"
+        # 3. Generar nombre de archivo con orden exacto: PALABRA_CLAVE + FECHA + ENTIDAD
+        fecha_captura = datetime.datetime.now().strftime("%Y%m%d")
+        safe_keyword = keyword.replace(" ", "_").upper()
+        safe_institucion = "".join([c if c.isalnum() else "_" for c in institucion.strip()[:60]])
+        # Estructura final: PUENTE_20260404_MUNICIPALIDAD.png
+        filename = f"{safe_keyword}_{fecha_captura}_{safe_institucion}.png"
         filepath = os.path.join(os.getcwd(), filename)
         
         # 4. CAPTURA FULL PAGE: Esto asegura que se vea toda la ficha
