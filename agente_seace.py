@@ -134,15 +134,23 @@ async def scanear_resultados(page: Page, year: int, drive_handler: GDriveHandler
             if any(key in texto_proyecto for key in KEYWORDS_INGENIERIA) and len(texto_fila.strip()) > 10:
                 logger.info(f"🎯 Hallazgo relevante: {texto_proyecto[:50]}...")
 
-                # Clic en el botón "Ver Ficha de Selección" (2do icono en 'Acciones')
-                btn_ficha = fila.locator('td').last.locator('a, button').nth(1)
-                await btn_ficha.click(force=True)
+                # 🎯 LOCALIZADOR DE PRECISIÓN para el icono de la Ficha (evita Lupas o Historial)
+                btn_ficha = fila.locator('td').last.locator('a, button').filter(
+                    has=page.locator('img[src*="ficha"], img[src*="cronograma"], .ui-icon-calendar, [title*="Ficha"], [title*="Cronograma"]')
+                ).first
 
-                # Esperamos que aparezca la ficha
-                await page.wait_for_selector('text="Regresar"', state="visible", timeout=30000)
-                await page.wait_for_timeout(1000)
+                if await btn_ficha.is_visible():
+                    logger.info(f"📅 Clic en Icono de Calendario (Ficha) para: {texto_fila[:40]}...")
+                    await btn_ficha.click(force=True)
 
-                await capturar_y_subir(page, texto_fila, year, drive_handler, folder_id)
+                    # Esperamos que cargue la ficha verificando un texto único de esa vista (como 'Regresar' o 'Cronograma')
+                    await page.wait_for_selector('text="Regresar"', state="visible", timeout=30000)
+                    await page.wait_for_timeout(1000)
+
+                    await capturar_y_subir(page, texto_fila, year, drive_handler, folder_id)
+                else:
+                    logger.warning(f"⚠️ No se encontró el icono de Ficha en la fila: {texto_fila[:40]}...")
+                    continue
 
                 # Volver a resultados
                 await page.locator('text="Regresar"').first.click(force=True)
