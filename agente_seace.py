@@ -212,15 +212,15 @@ async def ejecutar_agente():
                 await btn_tab.click(force=True)
                 
                 # Esperar al panel principal observando de forma estructural que carguen los campos clave
-                # Usamos el label que sabemos que existe en ese panel
-                await page.wait_for_selector('label:has-text("Objeto de Contratación")', state="visible", timeout=TIMEOUT_PORTAL)
+                # Usamos locator().first.wait_for para evitar errores de Strict Mode ("resolved to 2 elements")
+                await page.locator("input[id$='idFormBuscarProceso:descripcionObjeto']").first.wait_for(state="visible", timeout=TIMEOUT_PORTAL)
                 await page.wait_for_timeout(1500)
                 logger.info("✅ Panel de búsqueda detectado.")
             except Exception as nav_e:
                 logger.error(f"❌ No se pudo cargar el buscador por vía normal: {nav_e}")
                 # Entramos a la capa de visión IA de ser necesario
                 await clic_con_vision_ia(page, "el botón o pestaña para abrir el buscador de procedimientos de selección")
-                await page.wait_for_selector('label:has-text("Objeto de Contratación")', state="visible", timeout=TIMEOUT_PORTAL)
+                await page.locator("input[id$='idFormBuscarProceso:descripcionObjeto']").first.wait_for(state="visible", timeout=TIMEOUT_PORTAL)
                 await page.wait_for_timeout(1500)
                 logger.info("✅ Panel de búsqueda detectado vía IA.")
 
