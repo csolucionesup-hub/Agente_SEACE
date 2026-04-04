@@ -243,9 +243,9 @@ async def ejecutar_agente():
                     # PASO 3: Ver que la versión del SEACE sea la versión 3
                     await seleccionar_opcion_primefaces(page, "Version SEACE", "Seace 3")
 
-                    # Rellenar el filtro de descripción — Búsqueda de celda vecina exacta, sin esperas volátiles
+                    # Rellenar el filtro de descripción — Búsqueda dentro del panel usando su sufijo estático (inmune a j_idt)
                     panel_activo = page.locator('.ui-tabs-panel:visible').first
-                    input_desc = panel_activo.locator('xpath=descendant::td[contains(., "Descripción del Objeto")]/following-sibling::td[1]//input[@type="text"]').first
+                    input_desc = panel_activo.locator('input[id$=":descripcionObjeto"]').first
                     
                     # Playwright maneja internamente la espera con fill
                     await input_desc.fill(keyword, timeout=15000)
