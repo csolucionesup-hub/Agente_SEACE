@@ -4,15 +4,24 @@ Bot automatizado en Python para monitorear y documentar proyectos de construcci�
 
 ## 🎯 ¿Qué hace?
 
-El agente navega automáticamente el portal del SEACE, búsca procedimientos de selección de **Obras** (con filtro "puente") desde el año 2025 hasta el año actual, entra a la **Ficha de Selección** de cada proyecto encontrado, toma una captura de pantalla completa y la sube automáticamente a una carpeta de **Google Drive**.
+El agente tiene dos modos complementarios:
+
+1. **Modo API oficial OCDS/OECE**: consulta la API pública de Contrataciones Abiertas, encuentra oportunidades por palabra clave y exporta datos precisos en CSV/JSON para dashboards, reportes o Lovable.
+2. **Modo evidencia Playwright**: navega el buscador público del SEACE, entra a la ficha visible del procedimiento y toma capturas cuando se necesita respaldo visual para cliente.
+
+La fuente primaria recomendada es la API oficial; Playwright queda como verificador/evidencia.
 
 ## 🗂️ Estructura del Proyecto
 
 ```
 DCC_SEACE/
-├── agente_seace.py         # Agente principal (Playwright + lógica de navegación)
+├── agente_seace.py         # Agente Playwright para evidencia visual/fichas
+├── seace_api.py            # Cliente de API oficial OCDS/OECE
+├── seace_oportunidades.py  # CLI: búsqueda API + exportación CSV/JSON
+├── seace_config.py         # Configuración por variables de entorno
 ├── google_drive_handler.py # Módulo de integración con Google Drive API
-├── test_ficha.py           # Tests aislados de componentes
+├── tests/                  # Pruebas automáticas
+├── docs/                   # Arquitectura comercial y contrato para Lovable
 ├── requirements.txt        # Dependencias del proyecto
 ├── .gitignore              # Archivos excluidos del repositorio
 │
@@ -60,24 +69,110 @@ Si no configuras Google Drive, las capturas se guardarán localmente en la carpe
 
 ## 🚀 Uso
 
+### Modo recomendado: API oficial + exportación CSV/JSON
+
+```bash
+python seace_oportunidades.py --keywords PUENTE,CARRETERA,PILOTE --pages 1 --paginate-by 25 --output-dir reportes
+```
+
+El comando genera:
+
+```text
+reportes/oportunidades-seace-YYYYMMDD-HHMMSS.csv
+reportes/oportunidades-seace-YYYYMMDD-HHMMSS.json
+```
+
+Estos archivos son el insumo recomendado para Lovable o para un dashboard comercial.
+
+### Modo seguimiento: OCID activos hasta buena pro/contrato/caída
+
+```bash
+python seace_seguimiento.py \
+  --db data/seace_tracking.sqlite3 \
+  --dashboard reportes/dashboard-seguimiento.json \
+  --ocids ocds-dgv273-seacev3-1221249,ocds-dgv273-seacev3-999999
+```
+
+Actualizar diariamente los procesos activos ya guardados:
+
+```bash
+python seace_seguimiento.py --active
+```
+
+El seguimiento guarda cada expediente por `ocid`, genera eventos comerciales y produce un JSON limpio para dashboard/Lovable:
+
+- Nueva oportunidad.
+- Buena pro otorgada.
+- Contrato suscrito.
+- Proceso caído/interrumpido.
+- Fecha crítica actualizada.
+
+### Dashboard web local: FastAPI + frontend propio
+
+Primero genera o actualiza el JSON del seguimiento:
+
+```bash
+python seace_seguimiento.py \
+  --db data/seace_tracking.sqlite3 \
+  --dashboard reportes/dashboard-seguimiento.json \
+  --active
+```
+
+Luego levanta el dashboard local:
+
+```bash
+python -m uvicorn web_app:app --host 127.0.0.1 --port 8765
+```
+
+Abre:
+
+```text
+http://127.0.0.1:8765/
+```
+
+Endpoints disponibles:
+
+- `GET /api/health`
+- `GET /api/dashboard`
+- `GET /api/opportunities/{ocid}`
+
+La capa web sirve JSON sanitizado: no expone blobs `raw_json` al frontend y agrega cabeceras básicas de seguridad.
+
+### Modo evidencia visual: Playwright
+
 ```bash
 python agente_seace.py
 ```
 
 El agente:
-1. Abre una ventana de Chromium visible
-2. Navega al SEACE y aplica los filtros de búsqueda
-3. Entra a cada ficha de proyecto de puente encontrada
-4. Toma capturas de pantalla completas de cada ficha
-5. Las sube a Google Drive en una carpeta `SEACE_Proyectos_YYYY-MM-DD`
+1. Abre Chromium con Playwright
+2. Navega al SEACE y aplica filtros de búsqueda
+3. Entra a fichas de proyectos encontrados
+4. Toma capturas de pantalla completas
+5. Las sube a Google Drive si `credentials.json` existe; si no, las guarda localmente
+
+### Variables de entorno útiles para demo
+
+```bash
+SEACE_HEADLESS=true
+SEACE_KEYWORDS=PUENTE,CARRETERA,PILOTE
+SEACE_YEAR_START=2025
+SEACE_YEAR_END=2026
+SEACE_MAX_PAGES=1
+SEACE_MAX_CAPTURES=2
+SEACE_OUTPUT_DIR=screenshots/demo
+```
 
 ## 🛠️ Stack Tecnológico
 
 | Herramienta | Uso |
 |---|---|
-| [Playwright](https://playwright.dev/python/) | Automatización del navegador (RPA) |
-| [Google Drive API](https://developers.google.com/drive) | Almacenamiento en la nube |
-| Python `asyncio` | Ejecución asíncrona para performance |
+| API OCDS/OECE | Fuente primaria de datos estructurados de contrataciones abiertas |
+| Python stdlib `urllib` | Consultas HTTP sin dependencia adicional |
+| CSV/JSON | Entregables para dashboard, Lovable y análisis comercial |
+| [Playwright](https://playwright.dev/python/) | Automatización del navegador para evidencia visual |
+| [Google Drive API](https://developers.google.com/drive) | Almacenamiento opcional en la nube |
+| Python `asyncio` | Ejecución asíncrona para Playwright |
 | `logging` | Registro detallado de cada acción del agente |
 
 ## 📋 Requisitos del Sistema

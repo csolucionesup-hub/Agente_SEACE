@@ -5,6 +5,7 @@ import datetime
 from playwright.async_api import async_playwright, Page
 from google_drive_handler import GDriveHandler
 from ia_helper import cerebro_ia
+from seace_config import RuntimeConfig, get_runtime_config
 
 # Configuración de logging
 logging.basicConfig(
@@ -96,7 +97,7 @@ async def seleccionar_opcion_primefaces(page: Page, label_text: str, option_text
             f"seleccionar la opción '{option_text}' en el menú desplegable cuyo label dice '{label_text}'"
         )
 
-async def capturar_ficha_seace(page: Page, keyword: str, institucion: str, year: int, drive_handler: GDriveHandler, folder_id: str):
+async def capturar_ficha_seace(page: Page, keyword: str, institucion: str, year: int, drive_handler: GDriveHandler | None, folder_id: str | None, output_dir: os.PathLike | str = "."):
     """Espera el renderizado completo de la ficha y toma la captura."""
     profundidad = 0
     try:
@@ -126,7 +127,8 @@ async def capturar_ficha_seace(page: Page, keyword: str, institucion: str, year:
         safe_institucion = "".join([c if c.isalnum() else "_" for c in institucion.strip()[:60]])
         # Estructura final: PUENTE_20260404_MUNICIPALIDAD.png
         filename = f"{safe_keyword}_{fecha_captura}_{safe_institucion}.png"
-        filepath = os.path.join(os.getcwd(), filename)
+        os.makedirs(output_dir, exist_ok=True)
+        filepath = os.path.join(output_dir, filename)
         
         # 4. CAPTURA FULL PAGE: Esto asegura que se vea toda la ficha
         await page.screenshot(path=filepath, full_page=True)
@@ -165,8 +167,9 @@ async def capturar_ficha_seace(page: Page, keyword: str, institucion: str, year:
         except Exception as pop_err:
             logger.error(f"⚠️ Fallo crítico al intentar retroceder capas: {pop_err}")
 
-async def scanear_resultados(page: Page, keyword: str, year: int, drive_handler: GDriveHandler, folder_id: str):
-    """Escanea la tabla y gestiona hallazgos."""
+async def scanear_resultados(page: Page, keyword: str, year: int, drive_handler: GDriveHandler | None, folder_id: str | None, config: RuntimeConfig, captures_taken: int = 0):
+    """Escanea la tabla y gestiona hallazgos. Retorna cantidad de capturas nuevas."""
+    captured_count = 0
     try:
         table_selector = 'tbody[id$="dtProcesos_data"]'
         row_selector = f'{table_selector} tr.ui-widget-content'
@@ -176,13 +179,16 @@ async def scanear_resultados(page: Page, keyword: str, year: int, drive_handler:
         empty_msg = page.locator('td.ui-datatable-empty-message')
         if await empty_msg.is_visible():
             logger.info("ℹ️ No se encontraron resultados en esta página.")
-            return False
+            return 0
 
         await page.wait_for_selector(row_selector, state="visible", timeout=30000)
         count = await page.locator(row_selector).count()
 
-        encontrado_en_esta_pagina = False
         for i in range(count):
+            if config.max_captures and captures_taken + captured_count >= config.max_captures:
+                logger.info("Límite SEACE_MAX_CAPTURES=%s alcanzado.", config.max_captures)
+                return captured_count
+
             # Recargar el locator base de la fila CADA iteración
             await page.wait_for_selector(row_selector, state="visible", timeout=30000)
             fila = page.locator(row_selector).nth(i)
@@ -190,7 +196,7 @@ async def scanear_resultados(page: Page, keyword: str, year: int, drive_handler:
             texto_fila = await fila.inner_text()
             texto_proyecto = texto_fila.upper()
             
-            if any(key in texto_proyecto for key in KEYWORDS_INGENIERIA) and len(texto_fila.strip()) > 10:
+            if any(key in texto_proyecto for key in config.keywords) and len(texto_fila.strip()) > 10:
                 logger.info(f"🎯 Hallazgo relevante: {texto_proyecto[:50]}...")
 
                 # 🎯 LOCALIZADOR DE PRECISIÓN para el icono de la Ficha (evita Lupas o Historial)
@@ -216,19 +222,29 @@ async def scanear_resultados(page: Page, keyword: str, year: int, drive_handler:
 
                     # La función capturar_ficha_seace se encarga de esperar el cronograma, capturar y doble-regresar
 
-                    await capturar_ficha_seace(page, keyword, institucion_texto, year, drive_handler, folder_id)
+                    if await capturar_ficha_seace(page, keyword, institucion_texto, year, drive_handler, folder_id, config.output_dir):
+                        captured_count += 1
                 else:
                     logger.warning(f"⚠️ No se encontró el icono de Ficha en la fila: {texto_fila[:40]}...")
                     continue
 
-                encontrado_en_esta_pagina = True
-
-        return encontrado_en_esta_pagina
+        return captured_count
     except Exception as e:
         logger.error(f"Error en escaneo: {e}")
-        return False
+        return captured_count
 
 async def ejecutar_agente():
+    config = get_runtime_config()
+    logger.info(
+        "Configuración: headless=%s, años=%s-%s, keywords=%s, max_pages=%s, output_dir=%s",
+        config.headless,
+        config.year_start,
+        config.year_end,
+        ", ".join(config.keywords),
+        config.max_pages or "sin límite",
+        config.output_dir,
+    )
+
     # Inicializar Drive si existen credenciales
     logger.info("Verificando integración con Google Drive...")
     drive_handler = None
@@ -244,8 +260,8 @@ async def ejecutar_agente():
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
-            headless=False,
-            args=['--ssl-version-min=tls1', '--ignore-certificate-errors', '--window-size=1280,720']
+            headless=config.headless,
+            args=['--ssl-version-min=tls1', '--ignore-certificate-errors', '--window-size=1280,720', '--no-sandbox']
         )
         context = await browser.new_context(ignore_https_errors=True)
         page = await context.new_page()
@@ -254,7 +270,7 @@ async def ejecutar_agente():
             TIMEOUT_PORTAL = 45000 
             logger.info("🤖 Iniciando navegación al SEACE...")
             # Cambiado a domcontentloaded y pausa manual para PrimeFaces
-            await page.goto("https://prod2.seace.gob.pe/seacebus-uiwd-pub/publico/buscadorPublico.xhtml", 
+            await page.goto(config.seace_url, 
                           wait_until="domcontentloaded", timeout=TIMEOUT_PORTAL)
             await page.wait_for_timeout(3000)
             
@@ -290,9 +306,10 @@ async def ejecutar_agente():
                 await page.wait_for_timeout(1500)
                 logger.info("✅ Panel de búsqueda detectado vía IA.")
 
-            anyo_inicial = 2025
-            anyo_actual = datetime.datetime.now().year
+            anyo_inicial = config.year_start
+            anyo_actual = config.year_end
 
+            capturas_totales = 0
             for anyo in range(anyo_inicial, anyo_actual + 1):
                 logger.info(f"📅 Configurando parámetros fijos para el año {anyo}...")
                 # Seleccionar parámetros fijos por año
@@ -300,14 +317,14 @@ async def ejecutar_agente():
                 await seleccionar_opcion_primefaces(page, "Año de la Convocatoria", str(anyo))
                 await seleccionar_opcion_primefaces(page, "Version SEACE", "Seace 3")
                 
-                for keyword in KEYWORDS_INGENIERIA:
+                for keyword in config.keywords:
                     try:
                         logger.info(f"🚀 Iniciando búsqueda: año={anyo}, keyword='{keyword}'...")
 
                         # Idempotencia: Asegurarse de que el bot esté en el buscador nativo antes de iniciar
                         if "buscadorPublico.xhtml" not in page.url:
                             logger.warning(f"🔄 URL corrupta detectada para {keyword}. Forzando restablecimiento de la Pila de Navegación...")
-                            await page.goto("https://prod2.seace.gob.pe/seacebus-uiwd-pub/publico/buscadorPublico.xhtml", wait_until="domcontentloaded")
+                            await page.goto(config.seace_url, wait_until="domcontentloaded")
                             await page.wait_for_timeout(3000)
                             
                             # 1. Recuperar el Tab
@@ -347,7 +364,16 @@ async def ejecutar_agente():
                         pagina = 1
                         while True:
                             logger.info(f"📄 [{keyword}] Año {anyo} - Revisando página {pagina}...")
-                            await scanear_resultados(page, keyword, anyo, drive_handler, folder_id)
+                            nuevas_capturas = await scanear_resultados(page, keyword, anyo, drive_handler, folder_id, config, capturas_totales)
+                            capturas_totales += nuevas_capturas
+
+                            if config.max_captures and capturas_totales >= config.max_captures:
+                                logger.info("Límite total SEACE_MAX_CAPTURES=%s alcanzado; finalizando demo.", config.max_captures)
+                                return
+
+                            if config.max_pages and pagina >= config.max_pages:
+                                logger.info("Límite SEACE_MAX_PAGES=%s alcanzado para demo/control de ejecución.", config.max_pages)
+                                break
 
                             next_btn = page.locator('.ui-paginator-next').first
                             is_disabled = "ui-state-disabled" in (await next_btn.get_attribute("class") or "")

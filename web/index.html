@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LicitaScan · Detecta primero</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <aside class="sidebar" aria-label="Navegación principal">
+      <div class="brand logo-brand">
+        <img src="/assets/licitascan-logo-cropped.jpg" alt="LicitaScan · Detecta primero" />
+      </div>
+      <nav class="nav">
+        <button data-view="dashboard-view" class="nav-link active">Dashboard</button>
+        <button data-view="search-view" class="nav-link">Nueva búsqueda</button>
+        <button data-view="opportunities-view" class="nav-link">Bandeja</button>
+        <button data-view="alerts-view" class="nav-link">Alertas</button>
+        <button data-view="settings-view" class="nav-link">Configuración</button>
+      </nav>
+      <div class="sidebar-note">
+        <span>Fuente</span>
+        <strong>SEACE/OECE OCDS</strong>
+        <p>Datos públicos estructurados, sin credenciales del cliente.</p>
+      </div>
+    </aside>
+
+    <main class="app-shell">
+      <section id="dashboard-view" class="view active-view">
+        <header class="page-header">
+          <div>
+            <p class="eyebrow">LicitaScan · Detecta primero</p>
+            <h1>¿Qué debo mirar hoy?</h1>
+            <p>Prioriza procesos, buena pro, contratos y caídas sin revisar SEACE manualmente.</p>
+          </div>
+          <button class="primary-action" data-view-target="opportunities-view">Ver bandeja completa</button>
+        </header>
+
+        <h2>Prioridad de hoy</h2>
+        <section class="priority-grid" id="priority-cards" aria-label="Prioridad de hoy"></section>
+
+        <section class="dashboard-grid">
+          <div class="panel wide">
+            <div class="panel-header">
+              <h2>Oportunidades prioritarias</h2>
+              <button class="ghost" data-view-target="opportunities-view">Ver todas</button>
+            </div>
+            <div id="priority-list" class="card-list"></div>
+          </div>
+          <div class="panel">
+            <h2>Alertas comerciales</h2>
+            <div id="recent-alerts" class="alert-list"></div>
+          </div>
+        </section>
+
+        <section class="dashboard-grid two">
+          <div class="panel">
+            <h2>Distribución por etapa</h2>
+            <div id="stage-bars" class="bars"></div>
+          </div>
+          <div class="panel">
+            <h2>Distribución por resultado</h2>
+            <div id="outcome-bars" class="bars"></div>
+          </div>
+        </section>
+      </section>
+
+      <section id="search-view" class="view">
+        <header class="page-header compact">
+          <div>
+            <p class="eyebrow">Consulta oficial SEACE/OECE</p>
+            <h1>Nueva búsqueda</h1>
+            <p>Flujo similar a SEACE para que el equipo busque obras de puente como lo haría en Firefox: primero Obra, luego descripción, ficha, Expediente Técnico de Obra y Sección 2.</p>
+          </div>
+        </header>
+        <section class="panel seace-flow-guide" aria-label="Guía de uso estilo SEACE">
+          <div>
+            <p class="eyebrow">Flujo similar a SEACE</p>
+            <h2>Buscador de Procedimientos de Selección</h2>
+            <p>Diseñado para DCC y empresas de pilotes: encuentra obras reales de puente, abre la ficha/documento y prioriza Documento 0, ETO y Sección 2.</p>
+          </div>
+          <ol class="seace-flow-steps">
+            <li class="seace-flow-step"><strong>1</strong><span>Marca <b>Buscador de Procedimientos de Selección</b>.</span></li>
+            <li class="seace-flow-step"><strong>2</strong><span>En <b>Objeto de Contratación</b> selecciona <b>Obra</b>.</span></li>
+            <li class="seace-flow-step"><strong>3</strong><span>En <b>Descripción del Objeto</b> escribe <b>puente</b>, pontón o variante.</span></li>
+            <li class="seace-flow-step"><strong>4</strong><span>Abre el ícono ficha/documento y revisa <b>Documento 0</b>, ETO y <b>Sección 2</b>.</span></li>
+          </ol>
+        </section>
+        <form id="new-search-form" class="panel search-panel seace-like-form">
+          <div class="seace-form-title">
+            <span>SEACE</span>
+            <strong>Buscador de Procedimientos de Selección</strong>
+          </div>
+          <label>Nombre o Sigla de Entidad
+            <input id="new-search-entity" placeholder="Ej. Provías o Muni" />
+          </label>
+          <label><span class="label-with-help">Tipo de selección <button class="help-dot" type="button" id="tooltip-selection-type" data-tooltip="¿Qué significa? Es la modalidad del proceso: LP=Licitación Pública, AS=Adjudicación Simplificada, CP=Concurso Público. Puedes escribir una parte." aria-label="¿Qué significa tipo de selección?" title="Modalidad del proceso: LP, AS, CP, etc.">?</button></span>
+            <input id="new-search-selection-type" placeholder="Ej. LP, AS, CP" />
+          </label>
+          <label><span class="label-with-help">Objeto de Contratación <button class="help-dot" type="button" id="tooltip-contract-object" data-tooltip="¿Qué significa? Bien=compra/suministro; Servicio=servicios generales; Obra=construcción/mejoramiento; Consultoría de Obra=expediente técnico o supervisión. Para DCC usamos Obra." aria-label="¿Qué significa objeto de contratación?" title="Para DCC y pilotes se usa Obra.">?</button></span>
+            <select id="new-search-contract-object">
+              <option value="">Todos</option>
+              <option value="bien">Bien</option>
+              <option value="consultoria_obra">Consultoría de Obra</option>
+              <option value="obra" selected>Obra</option>
+              <option value="servicio">Servicio</option>
+            </select>
+          </label>
+          <label>Descripción del Objeto
+            <input id="new-search-description" value="puente" placeholder="Ej. puente, pontón, renovación de puente" />
+          </label>
+          <label>Palabra clave o frase <small>para ranking técnico</small>
+            <input id="new-search-keywords" required value="PUENTE" placeholder="Ej. puente" />
+          </label>
+          <label>Año de la Convocatoria
+            <select id="new-search-year" aria-label="Año de la Convocatoria">
+              <option selected>2026</option>
+              <option>2025</option>
+              <option>2024</option>
+            </select>
+          </label>
+          <label>Versión SEACE
+            <select id="new-search-seace-version" aria-label="Versión SEACE">
+              <option selected>Seace 3</option>
+              <option>Seace 2</option>
+            </select>
+          </label>
+          <label>Monto mínimo S/ <small>opcional</small>
+            <input id="new-search-min-amount" type="number" min="0" step="1000" placeholder="Ej. 1000000" />
+          </label>
+          <fieldset class="date-filter-group">
+            <legend>Fecha de publicación <button class="help-dot" type="button" id="tooltip-publication-date" data-tooltip="¿Qué significa? Es la fecha en que el proceso aparece/publica información en la fuente pública. Úsala para limitar búsquedas recientes." aria-label="¿Qué significa fecha de publicación?" title="Fecha en que el proceso aparece en la fuente pública.">?</button></legend>
+            <label>Desde <input id="new-search-publication-from" type="date" /></label>
+            <label>Hasta <input id="new-search-publication-to" type="date" /></label>
+          </fieldset>
+          <fieldset class="date-filter-group">
+            <legend>Fecha aproximada de convocatoria <button class="help-dot" type="button" id="tooltip-convocatoria-date" data-tooltip="¿Qué significa? Es el inicio aproximado del calendario de convocatoria/oferta. Sirve para ubicar procesos dentro de una ventana comercial." aria-label="¿Qué significa fecha de convocatoria?" title="Inicio aproximado del calendario de convocatoria/oferta.">?</button></legend>
+            <label>Desde <input id="new-search-convocatoria-from" type="date" /></label>
+            <label>Hasta <input id="new-search-convocatoria-to" type="date" /></label>
+          </fieldset>
+          <div class="seace-search-actions">
+            <button class="primary-action" type="submit" title="Buscar en todo SEACE con filtros de Obra y puente">Buscar obras de puente en todo SEACE</button>
+            <button class="ghost" type="button" id="recommended-search-preset" title="Configura una búsqueda amplia para evitar cero resultados: Obra + puente, sin tipo de selección ni fechas de convocatoria." data-tooltip="¿Qué hace? Limpia los filtros que suelen dejar la búsqueda en cero y deja una búsqueda amplia para encontrar oportunidades primero.">Usar configuración recomendada</button>
+          </div>
+        </form>
+        <div class="search-toolbar panel subtle-panel">
+          <div>
+            <span>Orden</span>
+            <strong>Mayor probabilidad → menor <button class="help-dot" type="button" id="tooltip-commercial-score" data-tooltip="¿Qué significa? La probabilidad combina monto, estado, fechas, coincidencia con keywords/variables y señales comerciales. No reemplaza la revisión del expediente." aria-label="¿Qué significa probabilidad comercial?" title="Ranking comercial calculado con monto, estado, fechas, keywords y variables.">?</button></strong>
+          </div>
+          <label>Resultados por página
+            <select id="search-page-size">
+              <option>10</option>
+              <option selected>25</option>
+              <option>50</option>
+              <option>100</option>
+            </select>
+          </label>
+        </div>
+        <div id="search-status" class="search-status"></div>
+        <div id="search-results" class="search-results"></div>
+        <div id="search-pagination" class="search-pagination"></div>
+      </section>
+
+      <section id="opportunities-view" class="view">
+        <header class="page-header compact">
+          <div>
+            <p class="eyebrow">Bandeja comercial</p>
+            <h1>Oportunidades prioritarias</h1>
+            <p>Lista tipo CRM para saber qué seguir, revisar o descartar.</p>
+          </div>
+        </header>
+        <div class="filters">
+          <input id="search-input" type="search" placeholder="Buscar por código, entidad o descripción…" />
+          <select id="stage-filter" aria-label="Filtrar por etapa"></select>
+          <select id="outcome-filter" aria-label="Filtrar por resultado"></select>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Prioridad</th>
+                <th>Proceso</th>
+                <th>Entidad</th>
+                <th>Estado</th>
+                <th>Monto ref.</th>
+                <th>Días restantes</th>
+                <th>Ganador</th>
+                <th>Acción recomendada</th>
+              </tr>
+            </thead>
+            <tbody id="opportunities-table"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="detail-view" class="view">
+        <button class="ghost back-button" data-view-target="opportunities-view">← Volver</button>
+        <h2 class="sr-only">Inteligencia competitiva</h2>
+        <h2 class="sr-only">Timeline del proceso</h2>
+        <h2 class="sr-only">Documentos oficiales</h2>
+        <div id="detail-content" class="detail-grid"></div>
+      </section>
+
+      <section id="alerts-view" class="view">
+        <header class="page-header compact">
+          <div>
+            <p class="eyebrow">Eventos críticos</p>
+            <h1>Alertas comerciales</h1>
+            <p>Señales que justifican atención inmediata del equipo comercial.</p>
+          </div>
+        </header>
+        <div id="alerts-groups" class="alert-groups"></div>
+      </section>
+
+      <section id="settings-view" class="view">
+        <header class="page-header compact">
+          <div>
+            <p class="eyebrow">Monitoreo seguro</p>
+            <h1>Configuración del cliente</h1>
+            <p>Reglas por rubro, keywords, montos y canales de alerta.</p>
+          </div>
+        </header>
+        <form id="settings-form" class="settings-grid">
+          <div class="panel">
+            <h2>Perfil del cliente</h2>
+            <label>Cliente <input id="settings-client-name" autocomplete="organization" /></label>
+            <label>Rubro <input id="settings-business-line" placeholder="Ej. Puentes y obras viales" /></label>
+          </div>
+          <div class="panel">
+            <h2>Keywords a monitorear <button class="help-dot" type="button" id="tooltip-settings-keywords" data-tooltip="¿Qué significa? Son palabras que se usarán por defecto en nuevas búsquedas si no escribes otra cosa. Ej.: puente, pontón, expediente técnico." aria-label="¿Qué significa keywords a monitorear?" title="Palabras usadas por defecto en búsquedas nuevas.">?</button></h2>
+            <div id="settings-keyword-list" class="chips editable-chips"></div>
+            <div class="inline-add">
+              <label>Nueva keyword <input id="settings-new-keyword" placeholder="Ej. pilotes" /></label>
+              <button class="ghost" type="button" id="settings-add-keyword">Agregar</button>
+            </div>
+          </div>
+          <div class="panel">
+            <h2>Reglas de monitoreo</h2>
+            <label>Monto mínimo <input id="settings-min-amount" type="number" min="0" step="1000" /></label>
+            <label>Frecuencia
+              <select id="settings-frequency">
+                <option value="manual">Manual</option>
+                <option value="diario">Diario</option>
+                <option value="cada_hora">Cada hora</option>
+              </select>
+            </label>
+          </div>
+          <div class="panel">
+            <h2>Canales permitidos</h2>
+            <div id="settings-channel-list" class="chips editable-chips"></div>
+            <div class="inline-add">
+              <label>Nuevo canal <input id="settings-new-channel" placeholder="Ej. WhatsApp" /></label>
+              <button class="ghost" type="button" id="settings-add-channel">Agregar</button>
+            </div>
+          </div>
+          <div class="panel wide-panel">
+            <h2>Variables personalizadas <button class="help-dot" type="button" id="tooltip-custom-variables" data-tooltip="¿Qué significa? Son reglas propias del cliente. Si el valor aparece en entidad/descripción/código, sube la probabilidad y queda como razón comercial." aria-label="¿Qué significa variables personalizadas?" title="Reglas del cliente que influyen en el ranking.">?</button></h2>
+            <p class="muted-copy">Úsalas para datos que afecten la calificación o tu forma de revisar: departamento, cliente final, especialidad, zona, responsable, etc.</p>
+            <div id="settings-custom-list" class="custom-variable-list"></div>
+            <div class="custom-variable-row">
+              <label>Variable <input id="settings-custom-name" placeholder="Ej. departamento" /></label>
+              <label>Valor <input id="settings-custom-value" placeholder="Ej. Amazonas" /></label>
+              <button class="ghost" type="button" id="settings-add-custom">Agregar</button>
+            </div>
+          </div>
+          <div class="panel wide-panel">
+            <h2>Resultados descartados <button class="help-dot" type="button" id="tooltip-ignored-ocids" data-tooltip="¿Qué significa? Son procesos que marcaste como no interesantes. Se ocultan de nuevas búsquedas, pero puedes restaurarlos si fue un error." aria-label="¿Qué significa resultados descartados?" title="Procesos ocultos de búsqueda que puedes restaurar.">?</button></h2>
+            <p class="muted-copy">Estos OCID están ocultos de tus búsquedas. Si descartaste uno por error, puedes restaurarlo.</p>
+            <div id="settings-ignored-list" class="custom-variable-list"></div>
+          </div>
+          <div class="panel wide-panel settings-actions">
+            <button class="primary-action" id="settings-save" type="submit">Guardar configuración</button>
+            <span id="settings-status" class="search-status"></span>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <script src="/assets/app.js"></script>
+  </body>
+</html>
