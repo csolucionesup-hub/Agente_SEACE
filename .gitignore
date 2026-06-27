@@ -8,19 +8,30 @@ token.json
 # --- Python / Entorno Virtual ---
 __pycache__/
 *.py[cod]
-*$py.class
+*.class
 venv/
 .venv/
 env/
 build/
 dist/
+.pytest_cache/
 
-# --- Archivos del Agente (Evita subir basura local) ---
-*.log
+# --- Datos y bases locales (generados en runtime) ---
+data/
+*.sqlite3
+*.sqlite3-journal
+
+# --- Salidas/artefactos generados (reportes, evidencias, capturas) ---
+reportes/
 screenshots/
+web/evidencias/
+*.log
+temp/
+
+# --- Imágenes (evita subir basura), pero conservar los logos del frontend ---
 *.png
 *.jpg
-temp/
+!web/*.jpg
 
 # --- IDEs ---
 .vscode/
