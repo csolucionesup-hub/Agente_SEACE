@@ -108,7 +108,17 @@ def _float_or_none(value: Any) -> float | None:
 
 
 def _supplier_ruc(supplier_id: str) -> str:
-    return supplier_id.replace("PE-RUC-", "").strip()
+    """Devuelve el RUC solo si es válido (11 dígitos).
+
+    Los consorcios no tienen RUC propio: SEACE les asigna un código interno corto
+    (p. ej. 'PE-RUC-165567'). Devolver ese código como si fuera un RUC engaña al
+    usuario, así que solo aceptamos RUCs reales de 11 dígitos; para consorcios el
+    RUC queda vacío y el ganador se identifica por su nombre.
+    """
+    candidate = supplier_id.replace("PE-RUC-", "").strip()
+    if len(candidate) == 11 and candidate.isdigit():
+        return candidate
+    return ""
 
 
 def _stage_and_outcome(tender: dict[str, Any], awards: list[dict[str, Any]], contracts: list[dict[str, Any]]) -> tuple[str, str]:
@@ -202,6 +212,7 @@ def diff_snapshots(previous: OpportunitySnapshot | None, current: OpportunitySna
                     "winner_ruc": current.winner_ruc,
                     "awarded_amount": current.awarded_amount,
                     "award_date": current.award_date,
+                    "source_url": _official_source_url(current.raw),
                 },
             )
         )
@@ -220,6 +231,7 @@ def diff_snapshots(previous: OpportunitySnapshot | None, current: OpportunitySna
                     "contract_date_signed": current.contract_date_signed,
                     "contract_start_date": current.contract_start_date,
                     "contract_end_date": current.contract_end_date,
+                    "source_url": _official_source_url(current.raw),
                 },
             )
         )

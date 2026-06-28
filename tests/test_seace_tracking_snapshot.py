@@ -108,6 +108,22 @@ def test_snapshot_preserves_official_tender_documents_for_dashboard():
     assert documents[0]["url"].startswith("https://")
 
 
+def record_won_by_consortium():
+    record = record_with_award_and_contract()
+    award = record["records"][0]["compiledRelease"]["awards"][0]
+    award["suppliers"] = [{"id": "PE-RUC-165567", "name": "CONSORCIO VIAL DEL NORTE"}]
+    return record
+
+
+def test_snapshot_blanks_ruc_for_consortium_internal_code():
+    # Un consorcio no tiene RUC propio; SEACE le da un código interno corto.
+    # No debe presentarse como si fuera un RUC real.
+    snapshot = snapshot_from_record(record_won_by_consortium())
+
+    assert snapshot.winner_name == "CONSORCIO VIAL DEL NORTE"
+    assert snapshot.winner_ruc == ""
+
+
 def test_snapshot_from_record_maps_award_and_contract():
     snapshot = snapshot_from_record(record_with_award_and_contract())
 
