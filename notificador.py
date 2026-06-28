@@ -46,6 +46,29 @@ def send_telegram(token: str, chat_id: str, text: str) -> bool:
     return _http_post_json(url, {"chat_id": chat_id, "text": text, "parse_mode": "HTML"})
 
 
+def send_telegram_photo(token: str, chat_id: str, photo_path: str, caption: str = "", timeout: float = 60.0) -> bool:
+    """Send a local image (e.g. the SEACE ficha screenshot) via sendPhoto.
+
+    Usa multipart/form-data para subir el PNG. Caption admite HTML (link al
+    expediente, ganador, monto). Pensado para la alerta de buena pro, donde la
+    captura full-page de la ficha aporta el cronograma y el look oficial.
+    """
+    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+    try:
+        import httpx
+        with open(photo_path, "rb") as handle:
+            response = httpx.post(
+                url,
+                data={"chat_id": chat_id, "caption": caption[:1024], "parse_mode": "HTML"},
+                files={"photo": handle},
+                timeout=timeout,
+            )
+        return response.is_success
+    except Exception as exc:
+        logger.error("Telegram sendPhoto failed: %s", exc)
+        return False
+
+
 def send_webhook(webhook_url: str, payload: dict[str, Any]) -> bool:
     """POST the event payload to an arbitrary webhook URL."""
     return _http_post_json(webhook_url, payload)
