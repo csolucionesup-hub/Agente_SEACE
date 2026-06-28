@@ -8,6 +8,7 @@ state quickly and safely.
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import tempfile
@@ -615,6 +616,7 @@ def create_app(
     settings_path: str | Path = DEFAULT_SETTINGS_PATH,
     seace_client: Any | None = None,
     ficha_capture_service: Any | None = None,
+    api_key: str | None = None,
 ) -> FastAPI:
     app = FastAPI(title="LicitaScan", version="0.1.0")
     dashboard_path = Path(dashboard_path)
@@ -623,6 +625,23 @@ def create_app(
     settings_path = Path(settings_path)
     api_client = seace_client or SeaceApiClient()
     capture_service = ficha_capture_service or _default_ficha_capture_service
+    configured_api_key = (api_key if api_key is not None else os.getenv("LICITASCAN_API_KEY", "")) or ""
+
+    @app.middleware("http")
+    async def require_api_key(request: Request, call_next):  # type: ignore[no-untyped-def]
+        # Si LICITASCAN_API_KEY está configurada, todo /api/* (salvo /api/health)
+        # exige la cabecera X-API-Key. Sin clave configurada, la auth queda desactivada.
+        if configured_api_key:
+            path = request.url.path
+            if path.startswith("/api/") and path != "/api/health":
+                provided = request.headers.get("X-API-Key", "")
+                if not hmac.compare_digest(provided, configured_api_key):
+                    return JSONResponse(
+                        {"detail": "API key invalida o ausente"},
+                        status_code=401,
+                        headers={"WWW-Authenticate": "ApiKey"},
+                    )
+        return await call_next(request)
 
     @app.middleware("http")
     async def add_security_headers(request: Request, call_next):  # type: ignore[no-untyped-def]

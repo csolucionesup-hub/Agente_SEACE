@@ -1,3 +1,18 @@
+// API key opcional: si está guardada en localStorage('licitascan_api_key'),
+// se adjunta como cabecera X-API-Key a toda llamada a /api. Sin clave, no cambia nada.
+(function () {
+  const apiKey = (window.localStorage && localStorage.getItem('licitascan_api_key')) || '';
+  if (!apiKey) return;
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = (input, init = {}) => {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (url.startsWith('/api')) {
+      init = { ...init, headers: { ...(init.headers || {}), 'X-API-Key': apiKey } };
+    }
+    return originalFetch(input, init);
+  };
+})();
+
 const state = {
   dashboard: null,
   filtered: [],
