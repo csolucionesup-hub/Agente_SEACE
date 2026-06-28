@@ -61,6 +61,29 @@ def test_partial_multiword_match_scores_below_full_phrase():
     assert 0 < partial["relevance_score"] < full["relevance_score"]
 
 
+def test_negative_keyword_demotes_ambiguous_noise():
+    # 'MUELLE' (embarcadero) jala 'hoja de muelle' (ballesta de camión).
+    noise = _row(description="CAMBIO DE 02 HOJAS DE MUELLE para volquete")
+    without = score_relevance(noise, ["MUELLE"])
+    with_anti = score_relevance(noise, ["MUELLE"], ["hoja de muelle"])
+    assert with_anti["relevance_score"] < without["relevance_score"]
+    assert "HOJA DE MUELLE" in with_anti["excluded_by"]
+    assert any("excluido" in reason.lower() for reason in with_anti["relevance_reasons"])
+
+
+def test_negative_keyword_does_not_affect_clean_match():
+    clean = _row(description="Construcción de muelle portuario de atraque")
+    with_anti = score_relevance(clean, ["MUELLE"], ["hoja de muelle", "abrazadera"])
+    assert with_anti["excluded_by"] == []
+    assert with_anti["relevance_score"] == score_relevance(clean, ["MUELLE"])["relevance_score"]
+
+
+def test_two_negative_matches_drive_score_to_zero():
+    noise = _row(description="hoja de muelle y abrazadera de repuesto para camion")
+    row = score_relevance(noise, ["MUELLE"], ["hoja de muelle", "abrazadera"])
+    assert row["relevance_score"] == 0
+
+
 def test_does_not_mutate_input_row():
     original = _row(description="carretera nueva")
     score_relevance(original, KEYWORDS)

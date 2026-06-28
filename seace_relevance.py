@@ -35,6 +35,11 @@ BEST_MATCH_WEIGHT = 85
 BREADTH_BONUS_PER_KEYWORD = 5
 BREADTH_BONUS_CAP = 15
 
+# Penalización por cada término del anti-diccionario que matchee. Demota fuerte
+# (no elimina): una obra con ruido cae al fondo del reporte pero sigue visible,
+# coherente con "mostrar todo". Dos coincidencias negativas la llevan a 0.
+NEGATIVE_PENALTY = 50
+
 
 def _normalize(text: Any) -> str:
     """Lowercase + sin tildes para comparar 'Construcción' con 'construccion'."""
@@ -85,13 +90,17 @@ def _keyword_match(keyword: str, title_text: str, body_text: str) -> tuple[float
 def score_relevance(
     row: dict[str, Any],
     keywords: list[str] | tuple[str, ...],
+    negative_keywords: list[str] | tuple[str, ...] | None = None,
     *,
     title_fields: tuple[str, ...] = TITLE_FIELDS,
     body_fields: tuple[str, ...] = BODY_FIELDS,
 ) -> dict[str, Any]:
     """Copia de ``row`` con ``relevance_score``, ``matched_keywords`` y razones.
 
-    No filtra ni descarta nada: solo puntúa. El reporte decide el orden.
+    ``negative_keywords`` es un anti-diccionario: cada término que matchee penaliza
+    el puntaje (demota, no elimina) para combatir keywords ambiguas — p. ej. 'MUELLE'
+    (embarcadero) jala 'hoja de muelle' (ballesta de camión); agregar 'hoja de muelle'
+    a los negativos manda ese ruido al fondo. No filtra ni descarta: solo puntúa.
     """
     enriched = dict(row)
     title_text = _normalize(" ".join(str(enriched.get(field) or "") for field in title_fields))
@@ -114,9 +123,26 @@ def score_relevance(
             reasons.append(f"'{upper}' en {where}")
 
     breadth_bonus = min(max(len(matched) - 1, 0) * BREADTH_BONUS_PER_KEYWORD, BREADTH_BONUS_CAP)
-    score = min(100, round(best_tier * BEST_MATCH_WEIGHT + breadth_bonus))
+    score = round(best_tier * BEST_MATCH_WEIGHT + breadth_bonus)
 
-    enriched["relevance_score"] = score
+    excluded_by: list[str] = []
+    combined_text = f"{title_text} {body_text}"
+    for negative in negative_keywords or []:
+        clean = str(negative or "").strip()
+        if not clean:
+            continue
+        # Las negativas exigen la frase completa (adyacente) para no penalizar por
+        # stopwords sueltos como "de"; el anti-diccionario debe ser preciso.
+        if not _contains_phrase(combined_text, _normalize(clean)):
+            continue
+        upper = clean.upper()
+        if upper not in excluded_by:
+            excluded_by.append(upper)
+            reasons.append(f"Penalizado por término excluido: '{upper}'")
+    score -= NEGATIVE_PENALTY * len(excluded_by)
+
+    enriched["relevance_score"] = max(0, min(100, score))
     enriched["matched_keywords"] = matched
+    enriched["excluded_by"] = excluded_by
     enriched["relevance_reasons"] = reasons
     return enriched

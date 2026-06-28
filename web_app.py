@@ -46,6 +46,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "client_name": "Constructora Andina S.A.C.",
     "business_line": "Construcción e infraestructura",
     "keywords": ["puente", "carretera", "expediente técnico", "obra vial"],
+    "negative_keywords": ["hoja de muelle", "abrazadera", "repuesto"],
     "min_amount": 1000000,
     "frequency": "diario",
     "channels": ["Telegram", "WhatsApp", "Google Sheets", "Webhook", "Excel/PDF"],
@@ -143,6 +144,7 @@ def normalize_settings(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         "client_name": str(merged.get("client_name") or DEFAULT_SETTINGS["client_name"]).strip(),
         "business_line": str(merged.get("business_line") or DEFAULT_SETTINGS["business_line"]).strip(),
         "keywords": _unique_text_list(merged.get("keywords")) or list(DEFAULT_SETTINGS["keywords"]),
+        "negative_keywords": _unique_text_list(merged.get("negative_keywords")),
         "min_amount": min_amount,
         "frequency": str(merged.get("frequency") or DEFAULT_SETTINGS["frequency"]).strip(),
         "channels": _unique_text_list(merged.get("channels")),
@@ -852,8 +854,13 @@ def create_app(
             convocatoria_to=convocatoria_to,
         )
         filtered = [opportunity for opportunity in filtered_by_seace if opportunity.amount is None or opportunity.amount >= effective_min_amount]
+        negative_keywords = settings.get("negative_keywords") or []
         rows = [
-            score_relevance(_apply_custom_variable_scoring(_search_result_row(opportunity), settings), clean_keywords)
+            score_relevance(
+                _apply_custom_variable_scoring(_search_result_row(opportunity), settings),
+                clean_keywords,
+                negative_keywords,
+            )
             for opportunity in filtered
         ]
         # Etapa 1: ordena primero por cercanía a las keywords (relevancia), luego por
