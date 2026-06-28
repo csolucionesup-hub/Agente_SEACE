@@ -15,6 +15,9 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 import csv
 import json
+import time
+
+import httpx
 
 
 DEFAULT_OCDS_BASE_URL = "https://contratacionesabiertas.oece.gob.pe"
@@ -41,6 +44,54 @@ class UrlLibJsonHttpClient:
         )
         with urlopen(request, timeout=60) as response:  # noqa: S310 - official public HTTPS API
             return json.loads(response.read().decode("utf-8"))
+
+
+DEFAULT_HTTP_HEADERS = {
+    "Accept": "application/json",
+    "User-Agent": "Agente-SEACE/1.0 (+https://github.com/csolucionesup-hub/Agente_SEACE)",
+}
+DEFAULT_HTTP_TIMEOUT = httpx.Timeout(15.0, connect=10.0)
+
+
+class HttpxJsonHttpClient:
+    """HTTP client with explicit timeouts and bounded retries on transient failures.
+
+    Replaces the stdlib client so a slow/unreachable upstream fails fast instead of
+    blocking a request worker for up to a minute. Reuses a single ``httpx.Client``.
+    """
+
+    def __init__(
+        self,
+        *,
+        timeout: httpx.Timeout = DEFAULT_HTTP_TIMEOUT,
+        retries: int = 2,
+        backoff: float = 0.5,
+        client: httpx.Client | None = None,
+    ):
+        self._retries = max(0, retries)
+        self._backoff = max(0.0, backoff)
+        self._client = client or httpx.Client(
+            timeout=timeout,
+            headers=DEFAULT_HTTP_HEADERS,
+            follow_redirects=True,
+        )
+
+    def get_json(self, url: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        for attempt in range(self._retries + 1):
+            try:
+                response = self._client.get(url, params=params or None)
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPStatusError as exc:
+                # Retry only on server errors (5xx); 4xx are caller/URL problems.
+                if exc.response.status_code < 500 or attempt >= self._retries:
+                    raise
+            except httpx.TransportError:
+                if attempt >= self._retries:
+                    raise
+            if self._backoff:
+                time.sleep(self._backoff * (attempt + 1))
+        raise RuntimeError("unreachable retry loop exit")  # pragma: no cover
 
 
 @dataclass(frozen=True)
@@ -77,7 +128,7 @@ class SeaceApiClient:
 
     def __init__(self, base_url: str = DEFAULT_OCDS_BASE_URL, http: JsonHttpClient | None = None):
         self.base_url = base_url.rstrip("/")
-        self.http = http or UrlLibJsonHttpClient()
+        self.http = http or HttpxJsonHttpClient()
 
     def search_opportunities(self, keyword: str, page: int = 1, paginate_by: int = 50) -> list[Opportunity]:
         payload = self.http.get_json(
