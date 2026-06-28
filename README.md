@@ -138,6 +138,22 @@ Endpoints disponibles:
 
 La capa web sirve JSON sanitizado: no expone blobs `raw_json` al frontend y agrega cabeceras básicas de seguridad.
 
+#### Autenticación opcional (API key)
+
+Si defines `LICITASCAN_API_KEY`, todo `/api/*` (salvo `/api/health`) exige la cabecera `X-API-Key` con ese valor. Sin la variable, la autenticación queda desactivada. Para la UI en el navegador, guarda la misma clave en `localStorage.licitascan_api_key`.
+
+### Worker de fondo (cron)
+
+Para que el backend no haga el crawl pesado dentro de un request, el `worker.py` precalcula la búsqueda de las keywords configuradas (a una caché de disco que la web lee) y refresca el seguimiento de los OCID activos:
+
+```bash
+python worker.py                 # precalcula búsqueda + refresca seguimiento
+python worker.py --skip-tracking # solo precalcular búsqueda
+python worker.py --skip-search   # solo refrescar seguimiento
+```
+
+Pensado para correr por cron (p. ej. cada 30 min). La búsqueda en caché caduca según `LICITASCAN_SEARCH_CACHE_TTL` (segundos, default 600); el crawl dentro de `/api/search` se corta a `LICITASCAN_SEARCH_DEADLINE` (segundos, default 20) y marca `search_truncated` si devuelve resultados parciales.
+
 ### Modo evidencia visual: Playwright
 
 ```bash

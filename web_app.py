@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from seace_commercial_scoring import enrich_opportunity
-from seace_api import SeaceApiClient
+from seace_api import Opportunity, SeaceApiClient
 from seace_oportunidades import collect_opportunities
 from seace_seguimiento import sync_ocids
 from seace_tracking import TrackingStore
@@ -37,6 +37,7 @@ DEFAULT_TRACKING_DB_PATH = Path("data/seace_tracking.sqlite3")
 DEFAULT_SETTINGS_PATH = Path("data/client_settings.json")
 DEFAULT_SEARCH_CACHE_TTL = float(os.getenv("LICITASCAN_SEARCH_CACHE_TTL", "600"))
 DEFAULT_SEARCH_DEADLINE = float(os.getenv("LICITASCAN_SEARCH_DEADLINE", "20"))
+DEFAULT_SEARCH_CACHE_PATH = Path("reportes/search-cache.json")
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "client_name": "Constructora Andina S.A.C.",
@@ -475,6 +476,53 @@ class _TTLCache:
             self._store[key] = (time.monotonic(), value)
 
 
+def _disk_cache_key(cache_key: tuple[Any, ...]) -> str:
+    keywords, max_pages, paginate_by = cache_key
+    return "||".join(keywords) + f"@@{int(max_pages)}@@{int(paginate_by)}"
+
+
+def _read_disk_search_cache(
+    path: str | Path, cache_key: tuple[Any, ...], ttl_seconds: float
+) -> tuple[list[Any], bool] | None:
+    """Return cached opportunities from disk if the entry exists and is still fresh."""
+    cache_path = Path(path)
+    if ttl_seconds <= 0 or not cache_path.exists():
+        return None
+    try:
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    entry = data.get(_disk_cache_key(cache_key)) if isinstance(data, dict) else None
+    if not isinstance(entry, dict):
+        return None
+    timestamp = entry.get("ts")
+    if not isinstance(timestamp, (int, float)) or (time.time() - timestamp) > ttl_seconds:
+        return None
+    opportunities = [Opportunity.from_row(row) for row in entry.get("rows") or [] if isinstance(row, dict)]
+    return opportunities, bool(entry.get("truncated"))
+
+
+def _write_disk_search_cache(
+    path: str | Path, cache_key: tuple[Any, ...], opportunities: list[Any], truncated: bool
+) -> None:
+    """Persist opportunities to a shared on-disk cache so a worker can warm the web app."""
+    cache_path = Path(path)
+    data: dict[str, Any] = {}
+    if cache_path.exists():
+        try:
+            existing = json.loads(cache_path.read_text(encoding="utf-8"))
+            if isinstance(existing, dict):
+                data = existing
+        except (json.JSONDecodeError, OSError):
+            data = {}
+    data[_disk_cache_key(cache_key)] = {
+        "ts": time.time(),
+        "truncated": bool(truncated),
+        "rows": [opportunity.to_row() for opportunity in opportunities],
+    }
+    _atomic_write_text(cache_path, json.dumps(data, ensure_ascii=False, indent=2))
+
+
 def _deep_search_opportunities(
     client: Any,
     keywords: list[str],
@@ -662,6 +710,7 @@ def create_app(
     api_key: str | None = None,
     search_cache_ttl: float = DEFAULT_SEARCH_CACHE_TTL,
     search_deadline: float = DEFAULT_SEARCH_DEADLINE,
+    search_cache_path: str | Path | None = None,
 ) -> FastAPI:
     app = FastAPI(title="LicitaScan", version="0.1.0")
     dashboard_path = Path(dashboard_path)
@@ -672,6 +721,7 @@ def create_app(
     capture_service = ficha_capture_service or _default_ficha_capture_service
     configured_api_key = (api_key if api_key is not None else os.getenv("LICITASCAN_API_KEY", "")) or ""
     search_cache = _TTLCache(search_cache_ttl)
+    disk_search_cache_path = Path(search_cache_path) if search_cache_path is not None else None
 
     @app.middleware("http")
     async def require_api_key(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -766,8 +816,11 @@ def create_app(
         safe_paginate_by = min(max(1, paginate_by), 100)
         cache_key = (tuple(sorted(clean_keywords)), safe_max_pages, safe_paginate_by)
         cached = search_cache.get(cache_key)
+        if cached is None and disk_search_cache_path is not None:
+            cached = _read_disk_search_cache(disk_search_cache_path, cache_key, search_cache_ttl)
         if cached is not None:
             opportunities, search_truncated = cached
+            search_cache.set(cache_key, cached)
             from_cache = True
         else:
             opportunities, search_truncated = _deep_search_opportunities(
@@ -778,6 +831,8 @@ def create_app(
                 deadline_seconds=search_deadline,
             )
             search_cache.set(cache_key, (opportunities, search_truncated))
+            if disk_search_cache_path is not None:
+                _write_disk_search_cache(disk_search_cache_path, cache_key, opportunities, search_truncated)
             from_cache = False
         ignored_ocids = set(settings.get("ignored_ocids") or [])
         visible_opportunities = [opportunity for opportunity in opportunities if opportunity.ocid not in ignored_ocids]
@@ -956,4 +1011,4 @@ def create_app(
     return app
 
 
-app = create_app()
+app = create_app(search_cache_path=DEFAULT_SEARCH_CACHE_PATH)

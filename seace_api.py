@@ -122,6 +122,12 @@ class Opportunity:
         row["record_url"] = self.record_url
         return row
 
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> "Opportunity":
+        """Rebuild an Opportunity from a ``to_row()`` dict (drops derived keys)."""
+        field_names = {field.name for field in fields(cls)}
+        return cls(**{key: value for key, value in row.items() if key in field_names})
+
 
 class SeaceApiClient:
     """Client for the official OECE Contrataciones Abiertas API."""
