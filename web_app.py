@@ -9,6 +9,7 @@ state quickly and safely.
 from __future__ import annotations
 
 import hmac
+import io
 import json
 import os
 import tempfile
@@ -21,15 +22,17 @@ from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from seace_commercial_scoring import enrich_opportunity
+from seace_relevance import score_relevance
 from seace_api import Opportunity, SeaceApiClient
 from seace_oportunidades import collect_opportunities
 from seace_seguimiento import sync_ocids
 from seace_tracking import TrackingStore
 from seace_documents import analyze_document, build_technical_file_response, download_verified_document, extract_official_documents, verify_document_link
+from seace_conosce import fetch_market_intel
 
 DEFAULT_DASHBOARD_PATH = Path("reportes/dashboard-seguimiento.json")
 DEFAULT_STATIC_DIR = Path("web")
@@ -849,8 +852,20 @@ def create_app(
             convocatoria_to=convocatoria_to,
         )
         filtered = [opportunity for opportunity in filtered_by_seace if opportunity.amount is None or opportunity.amount >= effective_min_amount]
-        rows = [_apply_custom_variable_scoring(_search_result_row(opportunity), settings) for opportunity in filtered]
-        rows.sort(key=lambda item: (item.get("commercial_score") or 0, item.get("amount") or 0), reverse=True)
+        rows = [
+            score_relevance(_apply_custom_variable_scoring(_search_result_row(opportunity), settings), clean_keywords)
+            for opportunity in filtered
+        ]
+        # Etapa 1: ordena primero por cercanía a las keywords (relevancia), luego por
+        # señal comercial y monto como desempate. No se descarta nada: se muestra todo.
+        rows.sort(
+            key=lambda item: (
+                item.get("relevance_score") or 0,
+                item.get("commercial_score") or 0,
+                item.get("amount") or 0,
+            ),
+            reverse=True,
+        )
         total_found = len(rows)
         safe_result_limit = min(max(1, result_limit), 500)
         visible_rows = rows[:safe_result_limit]
@@ -999,6 +1014,111 @@ def create_app(
         return JSONResponse(
             content=_expediente_export(opportunity, related_events),
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.get("/api/market-intel")
+    def market_intel(keyword: str = "", year: int | None = None, force_refresh: bool = False) -> dict[str, Any]:
+        """Return CONOSCE market intelligence: top entities, categories and winners."""
+        return fetch_market_intel(keyword=keyword, year=year, force_refresh=force_refresh)
+
+    @app.get("/api/export/xlsx")
+    def export_xlsx() -> Response:
+        """Export the current tracking dashboard as an Excel workbook."""
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, PatternFill, Alignment
+        except ImportError:
+            raise HTTPException(status_code=501, detail="openpyxl no está instalado; instala con pip install openpyxl")
+
+        data = load_dashboard(dashboard_path)
+        opportunities = data.get("opportunities", [])
+
+        wb = openpyxl.Workbook()
+
+        # ── Sheet 1: Oportunidades ───────────────────────────────────────────
+        ws1 = wb.active
+        ws1.title = "Oportunidades"
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(fill_type="solid", fgColor="0B43A5")
+        headers = [
+            "OCID", "Código proceso", "Entidad", "Descripción",
+            "Categoría", "Monto ref. (S/)", "Moneda",
+            "Etapa", "Resultado", "Fecha crítica",
+            "Ganador", "RUC ganador", "Monto adj. (S/)", "Fecha adjudicación",
+            "Contrato ID", "Fecha contrato",
+            "Score comercial", "Prioridad", "Acción recomendada",
+        ]
+        ws1.append(headers)
+        for cell in ws1[1]:
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center")
+
+        for opp in opportunities:
+            ws1.append([
+                opp.get("ocid", ""),
+                opp.get("process_code", ""),
+                opp.get("entity_name", ""),
+                opp.get("description", ""),
+                opp.get("category", ""),
+                opp.get("amount") or "",
+                opp.get("currency", ""),
+                opp.get("stage", ""),
+                opp.get("outcome", ""),
+                (opp.get("next_critical_date") or "")[:10],
+                opp.get("winner_name", ""),
+                opp.get("winner_ruc", ""),
+                opp.get("awarded_amount") or "",
+                (opp.get("award_date") or "")[:10],
+                opp.get("contract_id", ""),
+                (opp.get("contract_date_signed") or "")[:10],
+                opp.get("commercial_score") or "",
+                opp.get("priority_label", ""),
+                opp.get("recommended_action", ""),
+            ])
+
+        # Auto-fit columns (approximate)
+        for col in ws1.columns:
+            max_length = max((len(str(cell.value or "")) for cell in col), default=0)
+            ws1.column_dimensions[col[0].column_letter].width = min(max_length + 4, 50)
+
+        # ── Sheet 2: Eventos recientes ───────────────────────────────────────
+        ws2 = wb.create_sheet("Eventos recientes")
+        event_headers = ["OCID", "Tipo evento", "Título", "Mensaje", "Severidad", "Fecha"]
+        ws2.append(event_headers)
+        for cell in ws2[1]:
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center")
+
+        for event in data.get("recent_events", []):
+            ws2.append([
+                event.get("ocid", ""),
+                event.get("event_type", ""),
+                event.get("title", ""),
+                event.get("message", ""),
+                event.get("severity", ""),
+                (event.get("occurred_at") or "")[:19],
+            ])
+
+        # ── Sheet 3: Resumen ─────────────────────────────────────────────────
+        ws3 = wb.create_sheet("Resumen")
+        ws3.append(["Etapa", "Cantidad"])
+        for stage, count in data.get("counts_by_stage", {}).items():
+            ws3.append([stage, count])
+        ws3.append([])
+        ws3.append(["Resultado", "Cantidad"])
+        for outcome, count in data.get("counts_by_outcome", {}).items():
+            ws3.append([outcome, count])
+
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+
+        return Response(
+            content=buffer.read(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=\"licitascan-export.xlsx\""},
         )
 
     if static_dir.exists():
