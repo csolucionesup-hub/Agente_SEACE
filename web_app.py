@@ -13,6 +13,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 from datetime import datetime
 from dataclasses import asdict
 from copy import deepcopy
@@ -34,6 +35,8 @@ DEFAULT_DASHBOARD_PATH = Path("reportes/dashboard-seguimiento.json")
 DEFAULT_STATIC_DIR = Path("web")
 DEFAULT_TRACKING_DB_PATH = Path("data/seace_tracking.sqlite3")
 DEFAULT_SETTINGS_PATH = Path("data/client_settings.json")
+DEFAULT_SEARCH_CACHE_TTL = float(os.getenv("LICITASCAN_SEARCH_CACHE_TTL", "600"))
+DEFAULT_SEARCH_DEADLINE = float(os.getenv("LICITASCAN_SEARCH_DEADLINE", "20"))
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "client_name": "Constructora Andina S.A.C.",
@@ -445,22 +448,62 @@ def _search_result_row(opportunity: Any) -> dict[str, Any]:
     return enrich_opportunity(row)
 
 
+class _TTLCache:
+    """Tiny thread-safe TTL cache for expensive search results (per app instance)."""
+
+    def __init__(self, ttl_seconds: float):
+        self._ttl = max(0.0, ttl_seconds)
+        self._store: dict[Any, tuple[float, Any]] = {}
+        self._lock = threading.Lock()
+
+    def get(self, key: Any) -> Any | None:
+        if self._ttl <= 0:
+            return None
+        now = time.monotonic()
+        with self._lock:
+            entry = self._store.get(key)
+            if entry is not None and (now - entry[0]) <= self._ttl:
+                return entry[1]
+            if entry is not None:
+                self._store.pop(key, None)
+            return None
+
+    def set(self, key: Any, value: Any) -> None:
+        if self._ttl <= 0:
+            return
+        with self._lock:
+            self._store[key] = (time.monotonic(), value)
+
+
 def _deep_search_opportunities(
     client: Any,
     keywords: list[str],
     max_pages: int = 20,
     paginate_by: int = 50,
-) -> list[Any]:
+    deadline_seconds: float | None = None,
+) -> tuple[list[Any], bool]:
+    """Fetch opportunities across pages, stopping early if the wall-clock deadline is hit.
+
+    Returns ``(opportunities, truncated)`` where ``truncated`` is True when the deadline
+    cut the crawl short so callers can surface partial-result advice.
+    """
     by_ocid: dict[str, Any] = {}
+    start = time.monotonic()
+    truncated = False
     for keyword in keywords:
+        if truncated:
+            break
         for page in range(1, max_pages + 1):
+            if deadline_seconds is not None and (time.monotonic() - start) > deadline_seconds:
+                truncated = True
+                break
             page_results = client.search_opportunities(keyword, page=page, paginate_by=paginate_by)
             if not page_results:
                 break
             for opportunity in page_results:
                 key = opportunity.ocid or f"{opportunity.process_code}|{opportunity.entity_id}|{opportunity.date}"
                 by_ocid.setdefault(key, opportunity)
-    return list(by_ocid.values())
+    return list(by_ocid.values()), truncated
 
 
 def _apply_custom_variable_scoring(row: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
@@ -617,6 +660,8 @@ def create_app(
     seace_client: Any | None = None,
     ficha_capture_service: Any | None = None,
     api_key: str | None = None,
+    search_cache_ttl: float = DEFAULT_SEARCH_CACHE_TTL,
+    search_deadline: float = DEFAULT_SEARCH_DEADLINE,
 ) -> FastAPI:
     app = FastAPI(title="LicitaScan", version="0.1.0")
     dashboard_path = Path(dashboard_path)
@@ -626,6 +671,7 @@ def create_app(
     api_client = seace_client or SeaceApiClient()
     capture_service = ficha_capture_service or _default_ficha_capture_service
     configured_api_key = (api_key if api_key is not None else os.getenv("LICITASCAN_API_KEY", "")) or ""
+    search_cache = _TTLCache(search_cache_ttl)
 
     @app.middleware("http")
     async def require_api_key(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -718,12 +764,21 @@ def create_app(
         effective_min_amount = settings["min_amount"] if min_amount is None else min_amount
         safe_max_pages = min(max(1, max_pages), 50)
         safe_paginate_by = min(max(1, paginate_by), 100)
-        opportunities = _deep_search_opportunities(
-            api_client,
-            clean_keywords,
-            max_pages=safe_max_pages,
-            paginate_by=safe_paginate_by,
-        )
+        cache_key = (tuple(sorted(clean_keywords)), safe_max_pages, safe_paginate_by)
+        cached = search_cache.get(cache_key)
+        if cached is not None:
+            opportunities, search_truncated = cached
+            from_cache = True
+        else:
+            opportunities, search_truncated = _deep_search_opportunities(
+                api_client,
+                clean_keywords,
+                max_pages=safe_max_pages,
+                paginate_by=safe_paginate_by,
+                deadline_seconds=search_deadline,
+            )
+            search_cache.set(cache_key, (opportunities, search_truncated))
+            from_cache = False
         ignored_ocids = set(settings.get("ignored_ocids") or [])
         visible_opportunities = [opportunity for opportunity in opportunities if opportunity.ocid not in ignored_ocids]
         ignored_count = len(opportunities) - len(visible_opportunities)
@@ -764,6 +819,8 @@ def create_app(
             "keywords": clean_keywords,
             "min_amount": effective_min_amount,
             "searched_pages_limit": safe_max_pages,
+            "from_cache": from_cache,
+            "search_truncated": search_truncated,
             "ignored_count": ignored_count,
             "filtered_out_count": filtered_out_count,
             "search_advice": search_advice,
