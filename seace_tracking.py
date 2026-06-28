@@ -212,6 +212,7 @@ def diff_snapshots(previous: OpportunitySnapshot | None, current: OpportunitySna
                     "winner_ruc": current.winner_ruc,
                     "awarded_amount": current.awarded_amount,
                     "award_date": current.award_date,
+                    "source_url": _official_source_url(current.raw),
                 },
             )
         )
@@ -230,6 +231,7 @@ def diff_snapshots(previous: OpportunitySnapshot | None, current: OpportunitySna
                     "contract_date_signed": current.contract_date_signed,
                     "contract_start_date": current.contract_start_date,
                     "contract_end_date": current.contract_end_date,
+                    "source_url": _official_source_url(current.raw),
                 },
             )
         )

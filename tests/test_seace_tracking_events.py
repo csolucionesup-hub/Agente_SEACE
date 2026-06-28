@@ -54,6 +54,8 @@ def test_diff_award_transition_creates_buena_pro_event():
     assert events[0].severity == "high"
     assert "CONSTRUCTORA X SAC" in events[0].message
     assert events[0].payload["awarded_amount"] == 900000.0
+    # La alerta de exito debe ser accionable: link al expediente oficial.
+    assert "seace" in events[0].payload["source_url"].lower()
 
 
 def test_diff_contract_transition_creates_contract_event():
