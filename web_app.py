@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
+import threading
 from datetime import datetime
 from dataclasses import asdict
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -153,11 +155,40 @@ def load_settings(path: str | Path = DEFAULT_SETTINGS_PATH) -> dict[str, Any]:
     return normalize_settings(data)
 
 
+_SETTINGS_LOCK = threading.Lock()
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write text via a temp file + atomic replace so readers never see a partial file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=".settings-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(tmp_name, path)
+    except BaseException:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+        raise
+
+
 def save_settings(settings: dict[str, Any], path: str | Path = DEFAULT_SETTINGS_PATH) -> dict[str, Any]:
     normalized = normalize_settings(settings)
     settings_path = Path(path)
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+    with _SETTINGS_LOCK:
+        _atomic_write_text(settings_path, json.dumps(normalized, ensure_ascii=False, indent=2))
+    return normalized
+
+
+def update_settings(
+    mutator: Callable[[dict[str, Any]], dict[str, Any]],
+    path: str | Path = DEFAULT_SETTINGS_PATH,
+) -> dict[str, Any]:
+    """Lock-protected read-modify-write so concurrent updates don't lose each other."""
+    settings_path = Path(path)
+    with _SETTINGS_LOCK:
+        normalized = normalize_settings(mutator(load_settings(settings_path)))
+        _atomic_write_text(settings_path, json.dumps(normalized, ensure_ascii=False, indent=2))
     return normalized
 
 
@@ -627,9 +658,10 @@ def create_app(
         ocid = str(payload.get("ocid") or "").strip()
         if not ocid:
             raise HTTPException(status_code=400, detail="ocid is required")
-        settings = load_settings(settings_path)
-        settings["ignored_ocids"] = _unique_text_list([*(settings.get("ignored_ocids") or []), ocid])
-        return save_settings(settings, settings_path)
+        def _add_ignored(settings: dict[str, Any]) -> dict[str, Any]:
+            settings["ignored_ocids"] = _unique_text_list([*(settings.get("ignored_ocids") or []), ocid])
+            return settings
+        return update_settings(_add_ignored, settings_path)
 
     @app.post("/api/dismiss/restore")
     async def restore_dismissed_opportunity(request: Request) -> dict[str, Any]:
@@ -639,9 +671,10 @@ def create_app(
         ocid = str(payload.get("ocid") or "").strip()
         if not ocid:
             raise HTTPException(status_code=400, detail="ocid is required")
-        settings = load_settings(settings_path)
-        settings["ignored_ocids"] = [item for item in settings.get("ignored_ocids", []) if item != ocid]
-        return save_settings(settings, settings_path)
+        def _remove_ignored(settings: dict[str, Any]) -> dict[str, Any]:
+            settings["ignored_ocids"] = [item for item in settings.get("ignored_ocids", []) if item != ocid]
+            return settings
+        return update_settings(_remove_ignored, settings_path)
 
     @app.get("/api/search")
     def search_opportunities(
