@@ -139,7 +139,7 @@ class SeaceApiClient:
     def search_opportunities(self, keyword: str, page: int = 1, paginate_by: int = 50) -> list[Opportunity]:
         payload = self.http.get_json(
             f"{self.base_url}/api/v1/search",
-            params={"q": keyword, "page": page, "paginateBy": paginate_by, "format": "json"},
+            params={"search": keyword, "page": page, "paginateBy": paginate_by, "format": "json"},
         )
         return [normalize_search_result(result, keyword=keyword, base_url=self.base_url) for result in payload.get("results", [])]
 

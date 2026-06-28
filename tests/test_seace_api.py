@@ -86,7 +86,9 @@ def test_client_search_opportunities_calls_official_ocds_search_endpoint():
     assert opportunities[0].keyword == "PUENTE"
     called_url, params = http.calls[0]
     assert called_url == f"{DEFAULT_OCDS_BASE_URL}/api/v1/search"
-    assert params == {"q": "puente", "page": 2, "paginateBy": 25, "format": "json"}
+    # The OECE OCDS API only filters on the `search` param; `q` is silently
+    # ignored and returns the unfiltered firehose of every tender.
+    assert params == {"search": "puente", "page": 2, "paginateBy": 25, "format": "json"}
 
 
 
