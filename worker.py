@@ -40,6 +40,31 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 
+def _merge_keywords(base: Any, extra: Any) -> list[str]:
+    """Unión de keywords (base ∪ extra), sin duplicar (case-insensitive), preservando orden."""
+    merged: list[str] = []
+    seen: set[str] = set()
+    for item in list(base or []) + list(extra or []):
+        clean = str(item).strip()
+        if clean and clean.upper() not in seen:
+            merged.append(clean)
+            seen.add(clean.upper())
+    return merged
+
+
+def active_subscriber_keywords(db_path: str | Path) -> list[str]:
+    """Keywords de todos los suscriptores activos (para la búsqueda-unión del worker)."""
+    store = TrackingStore(db_path)
+    store.initialize()
+    try:
+        keywords: list[str] = []
+        for sub in store.list_subscribers(active_only=True):
+            keywords.extend(sub.keywords)
+        return keywords
+    finally:
+        store.close()
+
+
 def refresh_search_cache(
     client: Any,
     settings: dict[str, Any],
@@ -47,31 +72,52 @@ def refresh_search_cache(
     max_pages: int = 20,
     paginate_by: int = 50,
     deadline_seconds: float | None = None,
-) -> int:
-    """Run the deep search for the configured keywords and persist it to the disk cache."""
-    keywords = [str(item).strip() for item in settings.get("keywords") or [] if str(item).strip()]
+    *,
+    extra_keywords: list[str] | None = None,
+) -> list[Any]:
+    """Corre la búsqueda profunda y la persiste en el cache de disco.
+
+    ``extra_keywords`` (las de los suscriptores activos) se unen a las de settings
+    para que un solo crawl cubra el nicho de todos. Devuelve las oportunidades
+    encontradas (el worker las usa para sembrar el tracking).
+    """
+    keywords = _merge_keywords(settings.get("keywords"), extra_keywords)
     if not keywords:
-        return 0
+        return []
     cache_key = (tuple(sorted(keywords)), max_pages, paginate_by)
     opportunities, truncated = _deep_search_opportunities(
         client, keywords, max_pages=max_pages, paginate_by=paginate_by, deadline_seconds=deadline_seconds
     )
     _write_disk_search_cache(cache_path, cache_key, opportunities, truncated)
-    return len(opportunities)
+    return opportunities
 
 
 def refresh_tracking(
     client: Any,
     db_path: str | Path,
     dashboard_path: str | Path,
+    *,
+    seed_ocids: list[str] | None = None,
 ) -> tuple[int, list[Any]]:
-    """Update the active OCIDs, regenerate the dashboard JSON and return new events."""
+    """Refresca el seguimiento y devuelve los eventos nuevos.
+
+    Sigue los OCID ya activos UNIDOS a ``seed_ocids`` (OCID nuevos que descubrió la
+    búsqueda). Sembrar un OCID nuevo genera un evento ``nueva_oportunidad`` y, a
+    partir de ahí, queda en seguimiento para detectar la buena pro. ``track_record_payload``
+    maneja nuevos y existentes igual, así que una sola pasada cubre ambos.
+    """
     store = TrackingStore(db_path)
     store.initialize()
-    active = store.list_active_ocids()
-    events = sync_ocids(client, store, active, dashboard_path=dashboard_path)
+    ocids = list(store.list_active_ocids())
+    seen = set(ocids)
+    for ocid in seed_ocids or []:
+        clean = str(ocid).strip()
+        if clean and clean not in seen:
+            ocids.append(clean)
+            seen.add(clean)
+    events = sync_ocids(client, store, ocids, dashboard_path=dashboard_path)
     store.close()
-    return len(active), events
+    return len(ocids), events
 
 
 def run_cycle(
@@ -87,16 +133,22 @@ def run_cycle(
     """Run one full worker cycle: search cache refresh + tracking + notifications."""
     client = SeaceApiClient()
 
+    opportunities: list[Any] = []
     if not skip_search:
         settings = load_settings(settings_path)
-        count = refresh_search_cache(
-            client, settings, search_cache_path, max_pages=max_pages, paginate_by=paginate_by
+        extra_keywords = active_subscriber_keywords(db_path)
+        opportunities = refresh_search_cache(
+            client, settings, search_cache_path,
+            max_pages=max_pages, paginate_by=paginate_by, extra_keywords=extra_keywords,
         )
-        logger.info("Búsqueda precalculada: %d oportunidades -> %s", count, search_cache_path)
+        logger.info("Búsqueda precalculada: %d oportunidades -> %s", len(opportunities), search_cache_path)
 
     if not skip_tracking:
-        active_count, events = refresh_tracking(client, db_path, dashboard_path)
-        logger.info("Seguimiento: %d OCID activos, %d eventos nuevos -> %s", active_count, len(events), dashboard_path)
+        # Siembra al tracking los OCID nuevos que encontró la búsqueda (con las keywords
+        # de settings + suscriptores), así las alertas se disparan también en obras nuevas.
+        seed_ocids = [str(getattr(o, "ocid", "") or "") for o in opportunities] or None
+        tracked_count, events = refresh_tracking(client, db_path, dashboard_path, seed_ocids=seed_ocids)
+        logger.info("Seguimiento: %d OCID, %d eventos nuevos -> %s", tracked_count, len(events), dashboard_path)
 
         if events:
             # Reparte cada obra solo a los suscriptores que matchean (texto + ficha

@@ -40,6 +40,56 @@ def _http_post_json(url: str, payload: dict[str, Any], timeout: float = 10.0) ->
     return False
 
 
+def _http_get_json(url: str, timeout: float = 10.0) -> dict[str, Any]:
+    """GET + parse JSON, con httpx si está disponible y urllib de fallback."""
+    try:
+        import httpx
+        response = httpx.get(url, timeout=timeout)
+        return response.json() if response.is_success else {}
+    except ImportError:
+        pass
+    try:
+        import urllib.request
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            if resp.status >= 400:
+                return {}
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        logger.warning("HTTP GET to %s failed: %s", url, exc)
+        return {}
+
+
+def telegram_get_updates(token: str, *, timeout: float = 10.0, fetch: Any = None) -> list[dict[str, Any]]:
+    """Lista los chats recientes que le escribieron al bot, para descubrir su ``chat_id``.
+
+    El cliente le manda cualquier mensaje al bot; corriendo esto se obtiene su
+    ``chat_id`` (que después se da de alta como suscriptor). Devuelve
+    ``[{chat_id, name, text}]`` deduplicado por chat (último mensaje gana). ``fetch``
+    es inyectable (recibe ``url`` y devuelve el JSON) para testear sin red.
+    """
+    url = f"https://api.telegram.org/bot{token}/getUpdates"
+    data = _http_get_json(url, timeout) if fetch is None else fetch(url)
+    chats: dict[str, dict[str, Any]] = {}
+    for update in (data or {}).get("result") or []:
+        message = update.get("message") or update.get("channel_post") or {}
+        chat = message.get("chat") or {}
+        chat_id = chat.get("id")
+        if chat_id is None:
+            continue
+        name = (
+            chat.get("title")
+            or " ".join(part for part in [chat.get("first_name"), chat.get("last_name")] if part)
+            or chat.get("username")
+            or ""
+        )
+        chats[str(chat_id)] = {
+            "chat_id": str(chat_id),
+            "name": str(name),
+            "text": str(message.get("text") or ""),
+        }
+    return list(chats.values())
+
+
 def send_telegram(token: str, chat_id: str, text: str) -> bool:
     """Send a plain-text/HTML message via the Telegram Bot API."""
     url = f"https://api.telegram.org/bot{token}/sendMessage"

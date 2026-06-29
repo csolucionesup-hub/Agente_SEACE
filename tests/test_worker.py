@@ -5,8 +5,9 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from seace_api import Opportunity
+from seace_tracking import Subscriber, TrackingStore
 from web_app import create_app, load_settings, save_settings
-from worker import refresh_search_cache, refresh_tracking
+from worker import _merge_keywords, active_subscriber_keywords, refresh_search_cache, refresh_tracking
 
 
 def _opp(ocid: str) -> Opportunity:
@@ -58,7 +59,7 @@ def test_worker_warms_disk_cache_that_web_reads_without_upstream_calls(tmp_path)
     produced = refresh_search_cache(
         fake, load_settings(settings_path), cache_path, max_pages=20, paginate_by=50
     )
-    assert produced == 2
+    assert len(produced) == 2  # devuelve las oportunidades (para sembrar el tracking)
     calls_after_worker = fake.calls
     assert calls_after_worker > 0
 
@@ -81,3 +82,72 @@ def test_refresh_tracking_with_no_active_ocids(tmp_path):
     active, events = refresh_tracking(CountingClient(), tmp_path / "t.sqlite3", tmp_path / "dash.json")
     assert active == 0
     assert events == []
+
+
+def test_merge_keywords_dedups_case_insensitive_preserving_order():
+    assert _merge_keywords(["PUENTE", "Carretera"], ["carretera", "PILOTE"]) == ["PUENTE", "Carretera", "PILOTE"]
+    assert _merge_keywords(None, None) == []
+
+
+def test_active_subscriber_keywords_only_active(tmp_path):
+    db = tmp_path / "t.sqlite3"
+    store = TrackingStore(db)
+    store.initialize()
+    store.upsert_subscriber(Subscriber(name="a", telegram_chat_id="1", keywords=["PUENTE"], negative_keywords=[], active=True))
+    store.upsert_subscriber(Subscriber(name="b", telegram_chat_id="2", keywords=["MUELLE"], negative_keywords=[], active=False))
+    store.close()
+
+    assert active_subscriber_keywords(db) == ["PUENTE"]
+
+
+class RecordingClient:
+    def __init__(self):
+        self.searched = []
+
+    def search_opportunities(self, keyword, page=1, paginate_by=50):
+        self.searched.append(keyword)
+        if page > 1:
+            return []
+        return [_opp(f"ocds-{keyword}")]
+
+    def get_record(self, ocid):
+        return {}
+
+
+def test_refresh_search_cache_unions_extra_keywords(tmp_path):
+    client = RecordingClient()
+    opps = refresh_search_cache(
+        client, {"keywords": ["PUENTE"]}, tmp_path / "c.json", extra_keywords=["PILOTE", "puente"]
+    )
+    # unión sin duplicar (case-insensitive): PUENTE + PILOTE, no dos veces puente
+    assert set(client.searched) == {"PUENTE", "PILOTE"}
+    assert len(opps) == 2
+
+
+class SeedClient:
+    def __init__(self):
+        self.fetched = []
+
+    def search_opportunities(self, keyword, page=1, paginate_by=50):
+        return []
+
+    def get_record(self, ocid):
+        self.fetched.append(ocid)
+        return {"compiledRelease": {"ocid": ocid, "tender": {"title": f"LP-{ocid}", "description": "puente", "status": "active"}}}
+
+
+def test_refresh_tracking_seeds_new_ocids(tmp_path):
+    db = tmp_path / "t.sqlite3"
+    client = SeedClient()
+
+    tracked, events = refresh_tracking(client, db, tmp_path / "d.json", seed_ocids=["ocds-new-1", "ocds-new-2"])
+
+    assert tracked == 2
+    assert client.fetched == ["ocds-new-1", "ocds-new-2"]
+    assert {e.event_type for e in events} == {"nueva_oportunidad"}
+
+    store = TrackingStore(db)
+    store.initialize()
+    assert store.get_snapshot("ocds-new-1") is not None
+    assert store.list_active_ocids() == ["ocds-new-1", "ocds-new-2"]
+    store.close()
