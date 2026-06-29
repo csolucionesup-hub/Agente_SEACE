@@ -80,6 +80,50 @@ class TrackingEvent:
         return cls(payload=json.loads(payload_json), **data)
 
 
+@dataclass(frozen=True)
+class Subscriber:
+    """Un cliente de LicitaScan con su propio criterio de alerta.
+
+    Cada suscriptor define *qué* obras le interesan (``keywords`` /
+    ``negative_keywords``, mismo anti-diccionario que ``seace_relevance``) y *a
+    dónde* recibirlas (``telegram_chat_id``). El worker hace UNA búsqueda con la
+    unión de las keywords de todos y un repartidor rutea cada obra solo a los
+    suscriptores cuyas keywords matchean: cada cliente recibe únicamente lo suyo.
+    """
+
+    name: str
+    telegram_chat_id: str
+    keywords: list[str]
+    negative_keywords: list[str]
+    min_amount: float | None = None
+    active: bool = True
+    id: int | None = None
+
+    def to_row(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "telegram_chat_id": str(self.telegram_chat_id),
+            "keywords_json": json.dumps(list(self.keywords), ensure_ascii=False),
+            "negative_keywords_json": json.dumps(list(self.negative_keywords), ensure_ascii=False),
+            "min_amount": self.min_amount,
+            "active": 1 if self.active else 0,
+        }
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> "Subscriber":
+        data = dict(row)
+        return cls(
+            id=data.get("id"),
+            name=data["name"],
+            telegram_chat_id=str(data["telegram_chat_id"]),
+            keywords=json.loads(data.get("keywords_json") or "[]"),
+            negative_keywords=json.loads(data.get("negative_keywords_json") or "[]"),
+            min_amount=data.get("min_amount"),
+            active=bool(data.get("active", 1)),
+        )
+
+
 def _dig(data: dict[str, Any], *keys: str, default: Any = "") -> Any:
     current: Any = data
     for key in keys:
@@ -325,6 +369,18 @@ class TrackingStore:
 
             create index if not exists idx_opportunity_events_ocid
                 on opportunity_events(ocid, occurred_at, id);
+
+            create table if not exists subscribers (
+                id integer primary key autoincrement,
+                name text not null,
+                telegram_chat_id text not null unique,
+                keywords_json text not null default '[]',
+                negative_keywords_json text not null default '[]',
+                min_amount real,
+                active integer not null default 1,
+                created_at text not null default current_timestamp,
+                updated_at text not null default current_timestamp
+            );
             """
         )
         self.connection.commit()
@@ -394,6 +450,72 @@ class TrackingStore:
     def list_snapshots(self) -> list[OpportunitySnapshot]:
         rows = self.connection.execute("select * from opportunities order by ocid").fetchall()
         return [OpportunitySnapshot.from_row(row) for row in rows]
+
+    # --- Suscriptores (alertas por cliente) -------------------------------
+
+    def upsert_subscriber(self, subscriber: Subscriber) -> Subscriber:
+        """Crea o actualiza un suscriptor identificado por su ``telegram_chat_id``.
+
+        El chat de Telegram es la identidad del cliente (columna única): volver a
+        dar de alta el mismo chat actualiza sus criterios en vez de duplicarlo.
+        Devuelve el registro persistido, ya con su ``id`` asignado.
+        """
+        self.connection.execute(
+            """
+            insert into subscribers
+                (name, telegram_chat_id, keywords_json, negative_keywords_json, min_amount, active)
+            values
+                (:name, :telegram_chat_id, :keywords_json, :negative_keywords_json, :min_amount, :active)
+            on conflict(telegram_chat_id) do update set
+                name=excluded.name,
+                keywords_json=excluded.keywords_json,
+                negative_keywords_json=excluded.negative_keywords_json,
+                min_amount=excluded.min_amount,
+                active=excluded.active,
+                updated_at=current_timestamp
+            """,
+            subscriber.to_row(),
+        )
+        self.connection.commit()
+        saved = self.get_subscriber(subscriber.telegram_chat_id)
+        assert saved is not None  # acabamos de insertarlo/actualizarlo
+        return saved
+
+    def get_subscriber(self, telegram_chat_id: str) -> Subscriber | None:
+        row = self.connection.execute(
+            "select * from subscribers where telegram_chat_id = ?",
+            (str(telegram_chat_id),),
+        ).fetchone()
+        if row is None:
+            return None
+        return Subscriber.from_row(row)
+
+    def list_subscribers(self, active_only: bool = False) -> list[Subscriber]:
+        query = "select * from subscribers"
+        if active_only:
+            query += " where active = 1"
+        query += " order by id"
+        rows = self.connection.execute(query).fetchall()
+        return [Subscriber.from_row(row) for row in rows]
+
+    def set_subscriber_active(self, telegram_chat_id: str, active: bool) -> bool:
+        """Activa/desactiva un suscriptor. Devuelve True si existía."""
+        cursor = self.connection.execute(
+            "update subscribers set active = ?, updated_at = current_timestamp "
+            "where telegram_chat_id = ?",
+            (1 if active else 0, str(telegram_chat_id)),
+        )
+        self.connection.commit()
+        return cursor.rowcount > 0
+
+    def delete_subscriber(self, telegram_chat_id: str) -> bool:
+        """Elimina un suscriptor. Devuelve True si existía."""
+        cursor = self.connection.execute(
+            "delete from subscribers where telegram_chat_id = ?",
+            (str(telegram_chat_id),),
+        )
+        self.connection.commit()
+        return cursor.rowcount > 0
 
     def close(self) -> None:
         self.connection.close()
