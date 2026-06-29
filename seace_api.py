@@ -59,6 +59,10 @@ DEFAULT_HTTP_HEADERS = {
     "User-Agent": BROWSER_USER_AGENT,
     "Referer": "https://contratacionesabiertas.oece.gob.pe/",
     "Origin": "https://contratacionesabiertas.oece.gob.pe",
+    # Cuando el tráfico OCDS se enruta por un túnel ngrok (free), este header saltea
+    # la pantalla de aviso interstitial de ngrok (si no, devuelve HTML en vez del
+    # JSON). Yendo directo a OECE es un header desconocido que se ignora: inocuo.
+    "ngrok-skip-browser-warning": "true",
 }
 DEFAULT_HTTP_TIMEOUT = httpx.Timeout(15.0, connect=10.0)
 
