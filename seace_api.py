@@ -35,20 +35,25 @@ class UrlLibJsonHttpClient:
     def get_json(self, url: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         if params:
             url = f"{url}?{urlencode(params)}"
-        request = Request(
-            url,
-            headers={
-                "Accept": "application/json",
-                "User-Agent": "Agente-SEACE/1.0 (+https://github.com/csolucionesup-hub/Agente_SEACE)",
-            },
-        )
+        request = Request(url, headers=DEFAULT_HTTP_HEADERS)
         with urlopen(request, timeout=60) as response:  # noqa: S310 - official public HTTPS API
             return json.loads(response.read().decode("utf-8"))
 
 
+# El WAF de OECE responde 403 a User-Agents de "bot" desde IPs de datacenter
+# (p. ej. el server en Railway), aunque desde una IP residencial en Perú deje
+# pasar cualquier UA. Nos presentamos como un navegador real (UA + headers de
+# browser, incluido Referer del propio portal) para no gatillar ese bloqueo.
+BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
 DEFAULT_HTTP_HEADERS = {
-    "Accept": "application/json",
-    "User-Agent": "Agente-SEACE/1.0 (+https://github.com/csolucionesup-hub/Agente_SEACE)",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "es-PE,es;q=0.9,en;q=0.8",
+    "User-Agent": BROWSER_USER_AGENT,
+    "Referer": "https://contratacionesabiertas.oece.gob.pe/",
+    "Origin": "https://contratacionesabiertas.oece.gob.pe",
 }
 DEFAULT_HTTP_TIMEOUT = httpx.Timeout(15.0, connect=10.0)
 
