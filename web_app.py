@@ -61,10 +61,12 @@ SECURITY_HEADERS = {
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Content-Security-Policy": (
         "default-src 'self'; "
-        "script-src 'self'; "
+        # cdn.jsdelivr.net: librería supabase-js (login con Google) cargada por <script>.
+        "script-src 'self' https://cdn.jsdelivr.net; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
-        "connect-src 'self'; "
+        # *.supabase.co: el navegador habla con Supabase Auth (verificar sesión, OAuth).
+        "connect-src 'self' https://*.supabase.co; "
         "frame-src https://prodapp2.seace.gob.pe; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
