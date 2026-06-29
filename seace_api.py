@@ -15,12 +15,17 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 import csv
 import json
+import os
 import time
 
 import httpx
 
 
-DEFAULT_OCDS_BASE_URL = "https://contratacionesabiertas.oece.gob.pe"
+# Por defecto se pega contra OECE directo. Pero OECE bloquea (403) las IPs de
+# algunos datacenters (p. ej. Railway), aunque no las residenciales ni todas las
+# de cloud. Si se define OCDS_BASE_URL (un proxy en una IP permitida), el cliente
+# enruta TODO el tráfico OCDS por ahí. Local/tests dejan la env vacía -> OECE real.
+DEFAULT_OCDS_BASE_URL = os.getenv("OCDS_BASE_URL", "").strip() or "https://contratacionesabiertas.oece.gob.pe"
 
 
 class JsonHttpClient(Protocol):
