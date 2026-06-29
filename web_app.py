@@ -48,7 +48,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "business_line": "Construcción e infraestructura",
     "keywords": ["puente", "carretera", "expediente técnico", "obra vial"],
     "negative_keywords": ["hoja de muelle", "abrazadera", "repuesto"],
-    "min_amount": 1000000,
+    # Default para el nicho de puentes/paquetes de puentes: descarta obras chicas y
+    # deja las de monto sustancial (S/ 3M+), que son las que suelen incluir puentes.
+    "min_amount": 3000000,
     "frequency": "diario",
     "channels": ["Telegram", "WhatsApp", "Google Sheets", "Webhook", "Excel/PDF"],
     "custom_variables": [],

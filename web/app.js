@@ -645,12 +645,12 @@ function applyRecommendedSearchPreset() {
   byId('new-search-entity').value = '';
   byId('new-search-selection-type').value = '';
   byId('new-search-description').value = 'puente';
-  byId('new-search-min-amount').value = '0';
+  byId('new-search-min-amount').value = '3000000';
   byId('new-search-publication-from').value = '';
   byId('new-search-publication-to').value = '';
   byId('new-search-convocatoria-from').value = '';
   byId('new-search-convocatoria-to').value = '';
-  byId('search-status').textContent = 'Configuración recomendada aplicada: busca primero amplio; luego sube monto o agrega fechas si hay demasiados resultados.';
+  byId('search-status').textContent = 'Configuración recomendada para puentes aplicada (monto mínimo S/ 3.000.000). Si salen muy pocos, baja el monto o cambia el año.';
 }
 
 function applyRelaxedSearchFilters() {
