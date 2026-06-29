@@ -1,17 +1,59 @@
-// API key opcional: si está guardada en localStorage('licitascan_api_key'),
-// se adjunta como cabecera X-API-Key a toda llamada a /api. Sin clave, no cambia nada.
+// ── Auth: adjunta X-API-Key si está en localStorage y maneja 401 con modal ──
 (function () {
-  const apiKey = (window.localStorage && localStorage.getItem('licitascan_api_key')) || '';
-  if (!apiKey) return;
+  function getKey() { return (window.localStorage && localStorage.getItem('licitascan_api_key')) || ''; }
+
   const originalFetch = window.fetch.bind(window);
-  window.fetch = (input, init = {}) => {
+  window._apiFetch = async (input, init = {}) => {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
-    if (url.startsWith('/api')) {
-      init = { ...init, headers: { ...(init.headers || {}), 'X-API-Key': apiKey } };
+    const key = getKey();
+    if (url.startsWith('/api') && key) {
+      init = { ...init, headers: { ...(init.headers || {}), 'X-API-Key': key } };
     }
-    return originalFetch(input, init);
+    const response = await originalFetch(input, init);
+    if (response.status === 401) {
+      await showAuthModal();
+      // Retry once after auth
+      const newKey = getKey();
+      if (newKey) {
+        init = { ...init, headers: { ...(init.headers || {}), 'X-API-Key': newKey } };
+      }
+      return originalFetch(input, init);
+    }
+    return response;
   };
+  window.fetch = window._apiFetch;
 })();
+
+function showAuthModal() {
+  return new Promise(resolve => {
+    const modal = document.getElementById('auth-modal');
+    const form = document.getElementById('auth-form');
+    const errorEl = document.getElementById('auth-error');
+    if (!modal) { resolve(); return; }
+    errorEl && (errorEl.hidden = true);
+    modal.showModal();
+    const handler = async (event) => {
+      event.preventDefault();
+      const key = document.getElementById('auth-key-input')?.value?.trim() || '';
+      if (!key) return;
+      // Verify the key works
+      try {
+        const res = await fetch('/api/settings', { headers: { 'X-API-Key': key } });
+        if (res.ok) {
+          localStorage.setItem('licitascan_api_key', key);
+          modal.close();
+          form.removeEventListener('submit', handler);
+          resolve();
+        } else {
+          if (errorEl) errorEl.hidden = false;
+        }
+      } catch {
+        if (errorEl) errorEl.hidden = false;
+      }
+    };
+    form.addEventListener('submit', handler);
+  });
+}
 
 const state = {
   dashboard: null,
@@ -842,12 +884,73 @@ function bindEvents() {
   byId('new-search-form').addEventListener('submit', runNewSearch);
   byId('recommended-search-preset').addEventListener('click', applyRecommendedSearchPreset);
   byId('settings-form').addEventListener('submit', saveSettings);
+  byId('market-intel-form')?.addEventListener('submit', runMarketIntel);
   byId('search-page-size').addEventListener('change', event => {
     state.searchPageSize = Number(event.target.value || 25);
     state.searchPage = 1;
     renderSearchPage();
   });
   ['search-input', 'stage-filter', 'outcome-filter'].forEach(id => byId(id).addEventListener('input', applyFilters));
+}
+
+// ── Market Intelligence ───────────────────────────────────────────────────────
+async function runMarketIntel(event) {
+  event && event.preventDefault();
+  const status = byId('market-intel-status');
+  const resultsEl = byId('market-intel-results');
+  const keyword = byId('market-intel-keyword')?.value?.trim() || '';
+  const year = byId('market-intel-year')?.value || '';
+  if (status) status.textContent = 'Consultando CONOSCE… puede tardar si el archivo no está en caché.';
+  if (resultsEl) resultsEl.innerHTML = '';
+
+  try {
+    const params = new URLSearchParams({ keyword, year });
+    const response = await fetch(`/api/market-intel?${params}`);
+    const data = await response.json();
+
+    if (status) {
+      status.textContent = data.status === 'unavailable'
+        ? data.message || 'No disponible.'
+        : `${data.total_records.toLocaleString('es-PE')} convocatorias encontradas · S/ ${(data.total_amount || 0).toLocaleString('es-PE', { maximumFractionDigits: 0 })} total`;
+    }
+
+    if (resultsEl) {
+      resultsEl.innerHTML = `
+        <div class="dashboard-grid">
+          ${renderRankingPanel('Entidades que más compran', data.top_entities || [], 'name', 'count', 'procesos')}
+          ${renderRankingPanel('Categorías de contratación', data.top_categories || [], 'name', 'count', 'procesos')}
+          ${renderRankingPanel('Ganadores recurrentes', data.top_winners || [], 'name', 'count', 'adj.')}
+        </div>
+        ${data.sample_records?.length ? `<div class="panel">
+          <h2>Muestra de registros</h2>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Entidad</th><th>Descripción</th><th>Monto</th><th>Código</th></tr></thead>
+            <tbody>${data.sample_records.map(r => `<tr>
+              <td>${escapeHtml(r.entity || '')}</td>
+              <td>${escapeHtml(r.description || '')}</td>
+              <td>${formatMoney(r.amount)}</td>
+              <td>${escapeHtml(r.process_code || '')}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>
+        </div>` : ''}
+      `;
+    }
+  } catch (error) {
+    if (status) status.textContent = `Error: ${escapeHtml(error.message)}`;
+  }
+}
+
+function renderRankingPanel(title, items, nameKey, countKey, unit = '') {
+  if (!items.length) return `<div class="panel"><h2>${escapeHtml(title)}</h2><p>Sin datos.</p></div>`;
+  const max = Math.max(1, ...items.map(item => item[countKey] || 0));
+  return `<div class="panel">
+    <h2>${escapeHtml(title)}</h2>
+    <div class="bars">${items.map(item => `<div class="bar-row">
+      <span title="${escapeHtml(item[nameKey])}">${escapeHtml(String(item[nameKey] || '').slice(0, 35))}</span>
+      <div class="bar-track"><div class="bar-fill" style="width:${((item[countKey] || 0) / max) * 100}%"></div></div>
+      <strong>${item[countKey]} ${escapeHtml(unit)}</strong>
+    </div>`).join('')}</div>
+  </div>`;
 }
 
 async function start() {

@@ -16,6 +16,7 @@
         <button data-view="search-view" class="nav-link">Nueva búsqueda</button>
         <button data-view="opportunities-view" class="nav-link">Bandeja</button>
         <button data-view="alerts-view" class="nav-link">Alertas</button>
+        <button data-view="market-intel-view" class="nav-link">Inteligencia</button>
         <button data-view="settings-view" class="nav-link">Configuración</button>
       </nav>
       <div class="sidebar-note">
@@ -213,6 +214,34 @@
         <div id="alerts-groups" class="alert-groups"></div>
       </section>
 
+      <section id="market-intel-view" class="view">
+        <header class="page-header compact">
+          <div>
+            <p class="eyebrow">CONOSCE · OSCE</p>
+            <h1>Inteligencia de mercado</h1>
+            <p>Quién compra más, en qué categorías y quiénes ganan. Datos históricos públicos del Estado peruano.</p>
+          </div>
+          <a class="primary-action action-link" href="/api/export/xlsx" download>Exportar bandeja Excel</a>
+        </header>
+        <form id="market-intel-form" class="panel search-panel">
+          <label>Filtrar por palabra clave
+            <input id="market-intel-keyword" placeholder="Ej. puente, pilote, carretera" value="puente" />
+          </label>
+          <label>Año
+            <select id="market-intel-year">
+              <option value="2026" selected>2026</option>
+              <option value="2025">2025</option>
+              <option value="2024">2024</option>
+            </select>
+          </label>
+          <div class="seace-search-actions">
+            <button class="primary-action" type="submit">Analizar mercado</button>
+          </div>
+        </form>
+        <div id="market-intel-status" class="search-status"></div>
+        <div id="market-intel-results"></div>
+      </section>
+
       <section id="settings-view" class="view">
         <header class="page-header compact">
           <div>
@@ -276,6 +305,21 @@
         </form>
       </section>
     </main>
+
+    <!-- Modal de autenticación (solo visible si el backend pide API key) -->
+    <dialog id="auth-modal" class="auth-modal" aria-labelledby="auth-modal-title">
+      <form method="dialog" id="auth-form">
+        <h2 id="auth-modal-title">Acceso protegido</h2>
+        <p>Este LicitaScan requiere una clave de acceso. Ingresa la API key configurada por tu administrador.</p>
+        <label>API Key
+          <input type="password" id="auth-key-input" autocomplete="current-password" placeholder="Ingresa tu API key" required />
+        </label>
+        <div class="auth-actions">
+          <button class="primary-action" type="submit">Acceder</button>
+        </div>
+        <p id="auth-error" class="auth-error" hidden>Clave incorrecta. Inténtalo de nuevo.</p>
+      </form>
+    </dialog>
 
     <script src="/assets/app.js"></script>
   </body>

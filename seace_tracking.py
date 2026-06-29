@@ -213,6 +213,10 @@ def diff_snapshots(previous: OpportunitySnapshot | None, current: OpportunitySna
                     "awarded_amount": current.awarded_amount,
                     "award_date": current.award_date,
                     "source_url": _official_source_url(current.raw),
+                    # Datos para apuntar la captura de ficha a la obra EXACTA (alerta_ficha)
+                    "process_code": current.process_code,
+                    "entity_name": current.entity_name,
+                    "description": current.description,
                 },
             )
         )

@@ -80,4 +80,4 @@ def test_worker_warms_disk_cache_that_web_reads_without_upstream_calls(tmp_path)
 def test_refresh_tracking_with_no_active_ocids(tmp_path):
     active, events = refresh_tracking(CountingClient(), tmp_path / "t.sqlite3", tmp_path / "dash.json")
     assert active == 0
-    assert events == 0
+    assert events == []

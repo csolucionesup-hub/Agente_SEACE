@@ -1,11 +1,12 @@
 import asyncio
 import logging
 import os
+import re
 import datetime
 from playwright.async_api import async_playwright, Page
 from google_drive_handler import GDriveHandler
 from ia_helper import cerebro_ia
-from seace_config import RuntimeConfig, get_runtime_config
+from seace_config import RuntimeConfig, get_runtime_config, DEFAULT_SEACE_URL
 
 # Configuración de logging
 logging.basicConfig(
@@ -16,9 +17,41 @@ logger = logging.getLogger(__name__)
 
 # Palabras clave a buscar en el portal SEACE
 KEYWORDS_INGENIERIA = [
-    "PUENTE", "CARRETERA", "PILOTE", "MICROPILOTE", 
+    "PUENTE", "CARRETERA", "PILOTE", "MICROPILOTE",
     "CFA", "MUELLE", "PILOTE HINCADO"
 ]
+
+_YEAR_RE = re.compile(r"20\d{2}")
+
+
+def _derive_year_from_nomenclatura(nomenclatura: str, fallback: int | None = None) -> int:
+    """Extrae el año (20xx) de la nomenclatura, p.ej. 'LP-ABR-2-2025-CS-MDPP-1' -> 2025.
+
+    Si el parseo falla (formato raro, sin año), cae al `fallback` dado y, en última
+    instancia, al año actual. Así la captura dirigida nunca se queda sin filtro de año.
+    """
+    match = _YEAR_RE.search(nomenclatura or "")
+    if match:
+        year = int(match.group(0))
+        if 2000 <= year <= 2100:
+            return year
+    if fallback:
+        return int(fallback)
+    return datetime.datetime.now().year
+
+
+def _termino_busqueda_obra(descripcion: str, nomenclatura: str) -> str:
+    """Término distintivo para el campo 'Descripción del Objeto'.
+
+    El buscador SEACE NO matchea la nomenclatura en ese campo (verificado en vivo: pegar
+    la nomenclatura devuelve 0 resultados), pero sí matchea la descripción real. Usamos un
+    tramo suficientemente distintivo de la descripción; la fila exacta se confirma luego con
+    el guard por nomenclatura. Si no hay descripción, cae a la nomenclatura como último recurso.
+    """
+    desc = (descripcion or "").strip()
+    if len(desc) >= 12:
+        return desc[:90]
+    return (nomenclatura or "").strip()
 
 async def esperar_procesamiento(page: Page):
     """Espera a que los indicadores de carga de PrimeFaces desaparezcan."""
@@ -140,11 +173,13 @@ async def capturar_ficha_seace(page: Page, keyword: str, institucion: str, year:
             if file_id:
                 logger.info(f"🚀 Respaldado en Drive con ID: {file_id}")
                 os.remove(filepath)  # Limpieza local automática
-        
-        return True
+                return file_id  # truthy; el archivo local ya no existe
+
+        # Devolvemos la RUTA (truthy) para que el flujo de alerta pueda adjuntarla a Telegram.
+        return filepath
     except Exception as e:
         logger.error(f"❌ Error al capturar la ficha: {e}")
-        return False
+        return None
     finally:
         try:
             if profundidad >= 2:
@@ -166,6 +201,186 @@ async def capturar_ficha_seace(page: Page, keyword: str, institucion: str, year:
                 await page.wait_for_timeout(4000)
         except Exception as pop_err:
             logger.error(f"⚠️ Fallo crítico al intentar retroceder capas: {pop_err}")
+
+async def buscar_y_capturar_obra(
+    page: Page,
+    nomenclatura: str,
+    descripcion: str,
+    entity_name: str = "",
+    year: int | None = None,
+    drive_handler: GDriveHandler | None = None,
+    folder_id: str | None = None,
+    output_dir: os.PathLike | str = ".",
+    seace_url: str = DEFAULT_SEACE_URL,
+    max_pages: int = 3,
+) -> bool:
+    """Captura la ficha de UNA obra específica, identificada por su nomenclatura.
+
+    A diferencia del barrido por keywords (que toma 'la primera que matchee'), esta función
+    apunta a la obra exacta: busca por su descripción en el campo 'Descripción del Objeto'
+    (el buscador SEACE no tiene campo de nomenclatura) y luego selecciona la fila cuya
+    nomenclatura coincide EXACTAMENTE con `nomenclatura`. Pensada para la alerta de buena pro.
+
+    Devuelve True si capturó la ficha de la obra correcta.
+    """
+    nomen = (nomenclatura or "").strip()
+    if not nomen:
+        logger.error("buscar_y_capturar_obra: nomenclatura vacía; no se puede apuntar a la obra.")
+        return False
+
+    anio = _derive_year_from_nomenclatura(nomen, fallback=year)
+    termino = _termino_busqueda_obra(descripcion, nomen)
+    logger.info("🎯 Captura dirigida: nomenclatura=%s año=%s término=%r", nomen, anio, termino[:40])
+
+    # 1. Navegar al buscador y abrir su pestaña
+    await page.goto(seace_url, wait_until="domcontentloaded", timeout=45000)
+    await page.wait_for_timeout(3000)
+    tab_activo = False
+    for _ in range(5):
+        try:
+            btn_tab = page.locator("li[role='tab']:has-text('Buscador de Procedimientos de Selección')").first
+            await btn_tab.scroll_into_view_if_needed()
+            await btn_tab.click(force=True)
+            await page.locator("li[role='tab'].ui-state-active:has-text('Buscador de Procedimientos de Selección')").wait_for(state="visible", timeout=4000)
+            tab_activo = True
+            break
+        except Exception:
+            await page.wait_for_timeout(1000)
+    if not tab_activo:
+        logger.error("❌ No se pudo abrir el buscador SEACE para la captura dirigida.")
+        return False
+    await page.wait_for_timeout(4000)
+
+    # 2. Filtros fijos (Obra + año + Seace 3)
+    await seleccionar_opcion_primefaces(page, "Objeto de Contratación", "Obra")
+    await seleccionar_opcion_primefaces(page, "Año de la Convocatoria", str(anio))
+    await seleccionar_opcion_primefaces(page, "Version SEACE", "Seace 3")
+
+    # 3. Buscar por la descripción de la obra
+    panel = page.locator('.ui-tabs-panel:visible').first
+    input_desc = panel.locator('input[id$=":descripcionObjeto"]').first
+    await input_desc.click()
+    await page.keyboard.press("Control+A")
+    await page.keyboard.press("Backspace")
+    await page.wait_for_timeout(400)
+    await input_desc.fill(termino, timeout=15000)
+    await page.wait_for_timeout(1500)
+
+    btn_buscar = panel.locator('button:has-text("Buscar"), button[id$="btnBuscarSelToken"]').first
+    try:
+        await btn_buscar.click(force=True)
+    except Exception:
+        await btn_buscar.evaluate('node => node.click()')
+    await esperar_procesamiento(page)
+    try:
+        await page.wait_for_load_state("networkidle", timeout=15000)
+    except Exception:
+        pass
+    await page.wait_for_timeout(3000)
+
+    # 4. Guard: localizar la fila con la nomenclatura EXACTA (recorre páginas si hace falta)
+    row_selector = 'tbody[id$="dtProcesos_data"] tr.ui-widget-content'
+    pagina = 1
+    while pagina <= max_pages:
+        empty_msg = page.locator('td.ui-datatable-empty-message')
+        try:
+            if await empty_msg.is_visible():
+                logger.info("ℹ️ Sin resultados para la obra %s (página %s).", nomen, pagina)
+                break
+        except Exception:
+            pass
+        try:
+            await page.wait_for_selector(row_selector, state="visible", timeout=20000)
+        except Exception:
+            break
+
+        count = await page.locator(row_selector).count()
+        for i in range(count):
+            fila = page.locator(row_selector).nth(i)
+            try:
+                texto_fila = await fila.inner_text()
+            except Exception:
+                continue
+            if nomen not in texto_fila:
+                continue
+
+            logger.info("✅ Fila exacta encontrada (pág %s, fila %s) para %s", pagina, i, nomen)
+            btn_ficha = fila.locator('td').last.locator('a, button').filter(
+                has=page.locator('img[src*="ficha"], img[src*="cronograma"], .ui-icon-calendar, [title*="Ficha"], [title*="Cronograma"]')
+            ).first
+            if not await btn_ficha.is_visible():
+                logger.warning("⚠️ Fila de %s encontrada pero sin icono de ficha visible.", nomen)
+                return False
+
+            institucion = (entity_name or "").strip() or await fila.locator('td').nth(1).inner_text()
+            await page.wait_for_timeout(3000)  # PrimeFaces event hydration
+            await btn_ficha.scroll_into_view_if_needed()
+            await btn_ficha.click(timeout=10000)
+            await page.wait_for_selector('text="Regresar"', state="visible", timeout=30000)
+            # Reutiliza el core probado (espera cronograma, screenshot full-page, doble-regreso).
+            # Sanea '/' de la nomenclatura para el nombre de archivo.
+            return await capturar_ficha_seace(
+                page, nomen.replace("/", "-"), institucion, anio, drive_handler, folder_id, output_dir
+            )
+
+        # Siguiente página
+        next_btn = page.locator('.ui-paginator-next').first
+        try:
+            is_disabled = "ui-state-disabled" in (await next_btn.get_attribute("class") or "")
+        except Exception:
+            is_disabled = True
+        if is_disabled:
+            break
+        await next_btn.click()
+        await esperar_procesamiento(page)
+        try:
+            await page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            pass
+        pagina += 1
+
+    logger.warning("❌ No se encontró la fila con nomenclatura %s tras %s página(s).", nomen, pagina)
+    return False
+
+
+async def capturar_obra_standalone(
+    nomenclatura: str,
+    descripcion: str,
+    entity_name: str = "",
+    year: int | None = None,
+    output_dir: os.PathLike | str = ".",
+    seace_url: str = DEFAULT_SEACE_URL,
+    headless: bool = True,
+) -> str | None:
+    """Lanza un navegador propio, captura la ficha de la obra exacta y devuelve la ruta del PNG.
+
+    Pensada para el flujo de alerta (worker): gestiona el ciclo de vida del browser y NO usa
+    Drive, para que el PNG persista en disco y se pueda adjuntar a Telegram. Devuelve la ruta
+    del archivo o None si no se pudo capturar.
+    """
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=headless,
+            args=['--ssl-version-min=tls1', '--ignore-certificate-errors', '--window-size=1280,720', '--no-sandbox'],
+        )
+        context = await browser.new_context(ignore_https_errors=True)
+        page = await context.new_page()
+        try:
+            result = await buscar_y_capturar_obra(
+                page,
+                nomenclatura=nomenclatura,
+                descripcion=descripcion,
+                entity_name=entity_name,
+                year=year,
+                drive_handler=None,
+                folder_id=None,
+                output_dir=output_dir,
+                seace_url=seace_url,
+            )
+            return result if isinstance(result, str) and os.path.exists(result) else None
+        finally:
+            await browser.close()
+
 
 async def scanear_resultados(page: Page, keyword: str, year: int, drive_handler: GDriveHandler | None, folder_id: str | None, config: RuntimeConfig, captures_taken: int = 0):
     """Escanea la tabla y gestiona hallazgos. Retorna cantidad de capturas nuevas."""

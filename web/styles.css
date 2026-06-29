@@ -299,3 +299,26 @@ tr:hover td { background:#f9fafb; }
   .meta { gap:6px; }
   .badge { font-size:11px; padding:5px 8px; }
 }
+
+
+/* ── Auth modal ──────────────────────────────────────────────────────────── */
+.auth-modal {
+  border: none;
+  border-radius: 20px;
+  padding: 40px;
+  max-width: 420px;
+  width: 90vw;
+  box-shadow: 0 24px 64px rgba(0,0,0,.2);
+  background: var(--surface);
+}
+.auth-modal::backdrop { background: rgba(0,0,0,.55); backdrop-filter: blur(4px); }
+.auth-modal h2 { margin: 0 0 8px; font-size: 22px; }
+.auth-modal p { color: var(--muted); margin: 0 0 20px; }
+.auth-modal label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600; margin-bottom: 20px; }
+.auth-modal label input { padding: 10px 14px; border: 1.5px solid var(--line); border-radius: 10px; font-size: 15px; }
+.auth-modal label input:focus { outline: none; border-color: var(--brand); }
+.auth-actions { display: flex; gap: 12px; }
+.auth-error { color: var(--danger); font-size: 13px; margin: 8px 0 0; }
+
+/* ── Export button in page header ───────────────────────────────────────── */
+.page-header .action-link.primary-action { align-self: center; white-space: nowrap; }
