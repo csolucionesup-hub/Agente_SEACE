@@ -47,7 +47,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "client_name": "Constructora Andina S.A.C.",
     "business_line": "Construcción e infraestructura",
     "keywords": ["puente", "carretera", "expediente técnico", "obra vial"],
-    "negative_keywords": ["hoja de muelle", "abrazadera", "repuesto"],
+    # "puente piedra": es un distrito de Lima, no un puente — la keyword PUENTE
+    # matchea el nombre del lugar (obras de salud, colegios, etc.). El anti-diccionario
+    # lo demota para que suban los puentes reales. Sumá acá otros lugares con "puente".
+    "negative_keywords": ["hoja de muelle", "abrazadera", "repuesto", "puente piedra"],
     # Default para el nicho de puentes/paquetes de puentes: descarta obras chicas y
     # deja las de monto sustancial (S/ 3M+), que son las que suelen incluir puentes.
     "min_amount": 3000000,
