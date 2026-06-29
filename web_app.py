@@ -902,8 +902,16 @@ def create_app(
             )
             for opportunity in filtered
         ]
+        # Anti-diccionario en la BÚSQUEDA: OCULTA (no solo demota). Una obra que matchea
+        # una keyword negativa (p. ej. "puente piedra" = un distrito de Lima, no un puente;
+        # "hoja de muelle" = repuesto de camión) se descarta de los resultados — que es lo
+        # que el usuario espera al filtrar ruido. (En el reporte/seguimiento se sigue
+        # demotando sin eliminar; acá, en la búsqueda exploratoria, se esconde.)
+        hidden_by_negative = sum(1 for item in rows if item.get("excluded_by"))
+        rows = [item for item in rows if not item.get("excluded_by")]
+        filtered_out_count += hidden_by_negative
         # Etapa 1: ordena primero por cercanía a las keywords (relevancia), luego por
-        # señal comercial y monto como desempate. No se descarta nada: se muestra todo.
+        # señal comercial y monto como desempate.
         rows.sort(
             key=lambda item: (
                 item.get("relevance_score") or 0,
