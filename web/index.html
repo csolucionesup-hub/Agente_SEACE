@@ -24,6 +24,10 @@
         <strong>SEACE/OECE OCDS</strong>
         <p>Datos públicos estructurados, sin credenciales del cliente.</p>
       </div>
+      <div id="user-bar" class="user-bar" hidden>
+        <span id="user-email" class="user-email"></span>
+        <button id="logout-btn" class="ghost small" type="button">Salir</button>
+      </div>
     </aside>
 
     <main class="app-shell">
@@ -321,6 +325,20 @@
       </form>
     </dialog>
 
+    <!-- Pantalla de login con Google (visible solo si el backend tiene Supabase configurado) -->
+    <div id="login-gate" class="login-gate" hidden>
+      <div class="login-card">
+        <img src="/assets/licitascan-logo-cropped.jpg" alt="LicitaScan" class="login-logo" />
+        <h1>LicitaScan</h1>
+        <p>Detectá primero las obras del SEACE. Ingresá con tu cuenta de Google para empezar.</p>
+        <button id="google-login-btn" class="google-btn" type="button">
+          <span class="g-icon" aria-hidden="true">G</span> Entrar con Google
+        </button>
+        <p id="login-error" class="auth-error" hidden>No se pudo iniciar sesión. Intentá de nuevo.</p>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="/assets/app.js"></script>
   </body>
 </html>

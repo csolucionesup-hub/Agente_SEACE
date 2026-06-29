@@ -1,18 +1,29 @@
-// ── Auth: adjunta X-API-Key si está en localStorage y maneja 401 con modal ──
+// ── Auth: adjunta el token de Supabase (login con Google) o la API key, y maneja 401 ──
 (function () {
   function getKey() { return (window.localStorage && localStorage.getItem('licitascan_api_key')) || ''; }
+  function getToken() { return (window.__supabaseSession && window.__supabaseSession.access_token) || ''; }
 
   const originalFetch = window.fetch.bind(window);
+  window.__rawFetch = originalFetch;
   window._apiFetch = async (input, init = {}) => {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
-    const key = getKey();
-    if (url.startsWith('/api') && key) {
-      init = { ...init, headers: { ...(init.headers || {}), 'X-API-Key': key } };
+    if (url.startsWith('/api')) {
+      const token = getToken();
+      const key = getKey();
+      if (token) {
+        init = { ...init, headers: { ...(init.headers || {}), 'Authorization': 'Bearer ' + token } };
+      } else if (key) {
+        init = { ...init, headers: { ...(init.headers || {}), 'X-API-Key': key } };
+      }
     }
     const response = await originalFetch(input, init);
     if (response.status === 401) {
+      if (window.__authEnabled) {
+        // Sesión vencida o ausente: volver a pedir login con Google.
+        showLoginGate();
+        return response;
+      }
       await showAuthModal();
-      // Retry once after auth
       const newKey = getKey();
       if (newKey) {
         init = { ...init, headers: { ...(init.headers || {}), 'X-API-Key': newKey } };
@@ -23,6 +34,75 @@
   };
   window.fetch = window._apiFetch;
 })();
+
+// ── Login con Google vía Supabase ──
+function showLoginGate() {
+  const gate = document.getElementById('login-gate');
+  if (gate) gate.hidden = false;
+  document.body.classList.add('locked');
+}
+function hideLoginGate() {
+  const gate = document.getElementById('login-gate');
+  if (gate) gate.hidden = true;
+  document.body.classList.remove('locked');
+}
+
+async function initAuth() {
+  let config;
+  try {
+    config = await window.__rawFetch('/api/config').then(r => r.json());
+  } catch {
+    return; // sin /api/config seguimos como app abierta (dev/local)
+  }
+  window.__authEnabled = !!config.auth_enabled;
+  if (!config.auth_enabled) return;
+
+  if (!window.supabase || !window.supabase.createClient) {
+    console.error('supabase-js no cargó; la app continúa sin login.');
+    window.__authEnabled = false;
+    return;
+  }
+  const client = window.supabase.createClient(config.supabase_url, config.supabase_anon_key);
+  window.__supabaseClient = client;
+  client.auth.onAuthStateChange((_event, session) => { window.__supabaseSession = session || null; });
+
+  const loginBtn = document.getElementById('google-login-btn');
+  if (loginBtn) {
+    loginBtn.addEventListener('click', async () => {
+      const errorEl = document.getElementById('login-error');
+      errorEl && (errorEl.hidden = true);
+      const { error } = await client.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: window.location.origin },
+      });
+      if (error && errorEl) errorEl.hidden = false;
+    });
+  }
+  const logoutBtn = document.getElementById('logout-btn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      await client.auth.signOut();
+      window.location.reload();
+    });
+  }
+
+  const { data } = await client.auth.getSession();
+  window.__supabaseSession = data.session || null;
+
+  if (!window.__supabaseSession) {
+    showLoginGate();
+    // Bloquea el arranque hasta que haya sesión: el login redirige a Google y, al
+    // volver, getSession ya trae la sesión en una nueva carga de la página.
+    await new Promise(() => {});
+  }
+
+  hideLoginGate();
+  const email = (window.__supabaseSession.user && window.__supabaseSession.user.email) || '';
+  const emailEl = document.getElementById('user-email');
+  const bar = document.getElementById('user-bar');
+  if (emailEl) emailEl.textContent = email;
+  if (bar) bar.hidden = false;
+}
 
 function showAuthModal() {
   return new Promise(resolve => {
@@ -968,6 +1048,11 @@ async function start() {
   bindEvents();
 }
 
-start().catch(error => {
+async function bootstrap() {
+  await initAuth();
+  await start();
+}
+
+bootstrap().catch(error => {
   document.body.insertAdjacentHTML('beforeend', `<pre class="fatal-error">No se pudo cargar el dashboard: ${escapeHtml(error.message)}</pre>`);
 });

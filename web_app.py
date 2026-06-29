@@ -33,6 +33,7 @@ from seace_seguimiento import sync_ocids
 from seace_tracking import TrackingStore
 from seace_documents import analyze_document, build_technical_file_response, download_verified_document, extract_official_documents, verify_document_link
 from seace_conosce import fetch_market_intel
+from auth_supabase import SupabaseAuth, bearer_token
 
 DEFAULT_DASHBOARD_PATH = Path("reportes/dashboard-seguimiento.json")
 DEFAULT_STATIC_DIR = Path("web")
@@ -716,6 +717,9 @@ def create_app(
     search_cache_ttl: float = DEFAULT_SEARCH_CACHE_TTL,
     search_deadline: float = DEFAULT_SEARCH_DEADLINE,
     search_cache_path: str | Path | None = None,
+    supabase_url: str | None = None,
+    supabase_anon_key: str | None = None,
+    supabase_verify: Any | None = None,
 ) -> FastAPI:
     app = FastAPI(title="LicitaScan", version="0.1.0")
     dashboard_path = Path(dashboard_path)
@@ -725,23 +729,37 @@ def create_app(
     api_client = seace_client or SeaceApiClient()
     capture_service = ficha_capture_service or _default_ficha_capture_service
     configured_api_key = (api_key if api_key is not None else os.getenv("LICITASCAN_API_KEY", "")) or ""
+    supabase_auth = SupabaseAuth(supabase_url, supabase_anon_key, verify=supabase_verify)
     search_cache = _TTLCache(search_cache_ttl)
     disk_search_cache_path = Path(search_cache_path) if search_cache_path is not None else None
 
+    # Endpoints abiertos (sin auth): health para el monitor y config para que el
+    # frontend pueda inicializar Supabase antes de tener sesión.
+    PUBLIC_API_PATHS = {"/api/health", "/api/config"}
+
     @app.middleware("http")
-    async def require_api_key(request: Request, call_next):  # type: ignore[no-untyped-def]
-        # Si LICITASCAN_API_KEY está configurada, todo /api/* (salvo /api/health)
-        # exige la cabecera X-API-Key. Sin clave configurada, la auth queda desactivada.
-        if configured_api_key:
-            path = request.url.path
-            if path.startswith("/api/") and path != "/api/health":
+    async def require_auth(request: Request, call_next):  # type: ignore[no-untyped-def]
+        # Gate de /api/*: acepta un Bearer token de Supabase (login con Google) o,
+        # como compatibilidad/admin, la cabecera X-API-Key. Si no hay NADA
+        # configurado (ni Supabase ni API key), la auth queda desactivada (dev/local).
+        path = request.url.path
+        if path.startswith("/api/") and path not in PUBLIC_API_PATHS:
+            user: dict[str, Any] | None = None
+            if supabase_auth.enabled:
+                token = bearer_token(request)
+                if token:
+                    user = supabase_auth.verify_token(token)
+            if user is None and configured_api_key:
                 provided = request.headers.get("X-API-Key", "")
-                if not hmac.compare_digest(provided, configured_api_key):
-                    return JSONResponse(
-                        {"detail": "API key invalida o ausente"},
-                        status_code=401,
-                        headers={"WWW-Authenticate": "ApiKey"},
-                    )
+                if hmac.compare_digest(provided, configured_api_key):
+                    user = {"id": "api-key", "email": ""}
+            if user is None and (supabase_auth.enabled or configured_api_key):
+                return JSONResponse(
+                    {"detail": "No autenticado"},
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            request.state.user = user or {}
         return await call_next(request)
 
     @app.middleware("http")
@@ -754,6 +772,20 @@ def create_app(
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/config")
+    def public_config() -> dict[str, Any]:
+        # Datos públicos para que el frontend inicialice Supabase (la anon key es
+        # pública por diseño). Si auth_enabled es False, el front no exige login.
+        return {
+            "auth_enabled": supabase_auth.enabled,
+            "supabase_url": supabase_auth.url,
+            "supabase_anon_key": supabase_auth.anon_key,
+        }
+
+    @app.get("/api/me")
+    def current_user(request: Request) -> dict[str, Any]:
+        return {"user": getattr(request.state, "user", {}) or {}}
 
     @app.get("/api/dashboard")
     def dashboard() -> dict[str, Any]:

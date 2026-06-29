@@ -322,3 +322,55 @@ tr:hover td { background:#f9fafb; }
 
 /* ── Export button in page header ───────────────────────────────────────── */
 .page-header .action-link.primary-action { align-self: center; white-space: nowrap; }
+
+/* ── Login con Google (Supabase Auth) ───────────────────────────────────── */
+body.locked { overflow: hidden; }
+.login-gate {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  background: radial-gradient(120% 120% at 50% 0%, rgba(20,30,60,.85), rgba(8,12,24,.92));
+  backdrop-filter: blur(6px);
+}
+.login-gate[hidden] { display: none; }
+.login-card {
+  background: var(--surface);
+  border-radius: 24px;
+  padding: 44px 40px;
+  max-width: 420px; width: 100%;
+  text-align: center;
+  box-shadow: 0 30px 80px rgba(0,0,0,.35);
+}
+.login-logo { width: 140px; max-width: 60%; height: auto; margin: 0 auto 18px; display: block; }
+.login-card h1 { margin: 0 0 8px; font-size: 26px; }
+.login-card p { color: var(--muted); margin: 0 0 26px; font-size: 15px; line-height: 1.5; }
+.google-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; padding: 13px 18px;
+  border: 1.5px solid var(--line); border-radius: 12px;
+  background: #fff; color: #1f2937;
+  font-size: 15px; font-weight: 600; cursor: pointer;
+  transition: box-shadow .15s ease, transform .05s ease;
+}
+.google-btn:hover { box-shadow: 0 6px 18px rgba(0,0,0,.12); }
+.google-btn:active { transform: translateY(1px); }
+.google-btn .g-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: conic-gradient(from -45deg, #ea4335 0 25%, #fbbc05 0 50%, #34a853 0 75%, #4285f4 0);
+  color: #fff; font-weight: 800; font-size: 13px;
+}
+
+/* ── Chip de usuario en el sidebar ──────────────────────────────────────── */
+.user-bar {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.user-bar[hidden] { display: none; }
+.user-email {
+  flex: 1; min-width: 0;
+  font-size: 13px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ghost.small { padding: 5px 10px; font-size: 12px; }
