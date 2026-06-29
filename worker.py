@@ -25,8 +25,7 @@ from typing import Any
 from seace_api import SeaceApiClient
 from seace_seguimiento import sync_ocids
 from seace_tracking import TrackingStore
-from notificador import dispatch_events
-from alerta_ficha import despachar_fichas_buena_pro_sync
+from reparto import repartir_sync
 from web_app import (
     DEFAULT_DASHBOARD_PATH,
     DEFAULT_SEARCH_CACHE_PATH,
@@ -100,17 +99,14 @@ def run_cycle(
         logger.info("Seguimiento: %d OCID activos, %d eventos nuevos -> %s", active_count, len(events), dashboard_path)
 
         if events:
-            dispatched = dispatch_events(events)
-            for channel, count in dispatched.items():
-                logger.info("Alertas enviadas: %d eventos via %s", count, channel)
-
-            # Buena pro: además del texto, captura la ficha de la obra EXACTA y la envía como foto.
+            # Reparte cada obra solo a los suscriptores que matchean (texto + ficha
+            # capturada una vez por obra). Sin suscriptores cae al chat global del .env.
             try:
-                fichas = despachar_fichas_buena_pro_sync(events, output_dir="captures")
-                if fichas:
-                    logger.info("Fichas de buena pro enviadas a Telegram: %d", fichas)
+                repartido = repartir_sync(events, db_path=db_path, output_dir="captures")
+                for canal, count in repartido.items():
+                    logger.info("Alertas repartidas: %d via %s", count, canal)
             except Exception as exc:
-                logger.error("Captura de ficha de buena pro falló: %s", exc)
+                logger.error("Reparto de alertas falló: %s", exc)
 
 
 def build_parser() -> argparse.ArgumentParser:

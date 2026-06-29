@@ -55,6 +55,57 @@ def construir_caption(event: Any) -> str:
     return "\n".join(lines)
 
 
+async def capturar_fichas_buena_pro(
+    events: list[Any],
+    *,
+    output_dir: os.PathLike | str = ".",
+    headless: bool = True,
+    capturar: CaptureFn | None = None,
+) -> dict[str, str]:
+    """Captura la ficha EXACTA de cada obra con buena pro UNA sola vez.
+
+    Devuelve un mapa ``ocid -> ruta del PNG``. Solo captura (no envía): es el
+    paso que necesita el repartidor (``reparto.py``) para reusar el mismo PNG en
+    cada chat que matchea — una obra que interesa a 10 clientes se captura una vez
+    y se reenvía 10 veces. ``despachar_fichas_buena_pro`` (legacy, chat global)
+    sigue con su propio bucle captura+envía para no cambiar su comportamiento.
+    """
+    fichas: dict[str, str] = {}
+    captura_fn = capturar
+    if captura_fn is None:
+        from agente_seace import capturar_obra_standalone as captura_fn  # import perezoso (Playwright)
+    for event in events:
+        if not _is_buena_pro(event):
+            continue
+        ocid = str(getattr(event, "ocid", "") or "")
+        payload = getattr(event, "payload", None) or {}
+        nomen = str(payload.get("process_code") or "").strip()
+        desc = str(payload.get("description") or "").strip()
+        if not nomen:
+            logger.warning("alerta_ficha: buena pro sin process_code; se omite la ficha.")
+            continue
+        if ocid and ocid in fichas:
+            continue  # esta obra ya se capturó en este ciclo
+        try:
+            path = await captura_fn(
+                nomenclatura=nomen,
+                descripcion=desc,
+                entity_name=str(payload.get("entity_name") or ""),
+                output_dir=output_dir,
+                headless=headless,
+            )
+        except Exception as exc:
+            logger.error("alerta_ficha: fallo capturando ficha de %s: %s", nomen, exc)
+            path = None
+        if path and ocid:
+            fichas[ocid] = path
+        elif path and not ocid:
+            logger.warning("alerta_ficha: ficha de %s capturada sin ocid; no se puede rutear.", nomen)
+        else:
+            logger.warning("alerta_ficha: no se capturó ficha para %s.", nomen)
+    return fichas
+
+
 async def despachar_fichas_buena_pro(
     events: list[Any],
     *,
