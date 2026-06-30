@@ -389,17 +389,25 @@ async function openDetail(ocid) {
     </aside>
   </section>
   <section class="dashboard-grid two">
-    <div class="panel">
-      <h2>Inteligencia competitiva</h2>
-      ${item.winner_name ? `<div class="kv">
-        <div><span>Ganador</span><strong>${escapeHtml(item.winner_name)}</strong></div>
-        <div><span>RUC</span><strong>${escapeHtml(item.winner_ruc)}</strong></div>
-        <div><span>Monto adjudicado</span><strong>${formatMoney(item.awarded_amount)}</strong></div>
-        <div><span>Fecha buena pro</span><strong>${formatDate(item.award_date)}</strong></div>
-      </div>` : '<p>Aún no hay ganador. Mantener seguimiento hasta buena pro.</p>'}
-      <div id="ficha-viewer-panel" class="ficha-inline" hidden>
-        <h3>Ficha de Selección SEACE</h3>
-        <div id="ficha-viewer-content"></div>
+    <div class="detail-left-col">
+      <div class="panel">
+        <h2>Inteligencia competitiva</h2>
+        ${item.winner_name ? `<div class="kv">
+          <div><span>Ganador</span><strong>${escapeHtml(item.winner_name)}</strong></div>
+          <div><span>RUC</span><strong>${escapeHtml(item.winner_ruc)}</strong></div>
+          <div><span>Monto adjudicado</span><strong>${formatMoney(item.awarded_amount)}</strong></div>
+          <div><span>Fecha buena pro</span><strong>${formatDate(item.award_date)}</strong></div>
+        </div>` : '<p>Aún no hay ganador. Mantener seguimiento hasta buena pro.</p>'}
+        <div id="ficha-viewer-panel" class="ficha-inline" hidden>
+          <h3>Ficha de Selección SEACE</h3>
+          <div id="ficha-viewer-content"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Timeline del proceso</h2>
+        <div class="timeline">${detail.timeline.map(event => `<div class="timeline-item ${escapeHtml(event.status)}">
+          <span class="timeline-dot"></span><div><strong>${escapeHtml(event.title)}</strong><br><small>${formatDate(event.date)} · ${escapeHtml(event.description || statusLabel(event.status))}</small></div>
+        </div>`).join('')}</div>
       </div>
     </div>
     <div class="panel" id="official-documents-panel">
@@ -410,14 +418,6 @@ async function openDetail(ocid) {
         <p class="muted-copy">Documentos técnicos del ETO (Memoria, Especificaciones, Planos, Metrados, Presupuesto, Análisis de precios…). Tarda ~1 min: navega SEACE en vivo.</p>
         <div id="eto-content"></div>
       </div>
-    </div>
-  </section>
-  <section class="dashboard-grid two">
-    <div class="panel wide-panel">
-      <h2>Timeline del proceso</h2>
-      <div class="timeline">${detail.timeline.map(event => `<div class="timeline-item ${escapeHtml(event.status)}">
-        <span class="timeline-dot"></span><div><strong>${escapeHtml(event.title)}</strong><br><small>${formatDate(event.date)} · ${escapeHtml(event.description || statusLabel(event.status))}</small></div>
-      </div>`).join('')}</div>
     </div>
   </section>`;
   setView('detail-view');

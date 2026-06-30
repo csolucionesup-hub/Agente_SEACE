@@ -395,3 +395,6 @@ body.locked { overflow: hidden; }
 /* Ficha de Seleccion embebida en el panel de Inteligencia competitiva */
 .ficha-inline { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 14px; }
 .ficha-inline h3 { margin: 0 0 8px; font-size: 15px; color: var(--text); }
+
+/* Columna izquierda del detalle: apila Inteligencia/ficha + Timeline */
+.detail-left-col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
