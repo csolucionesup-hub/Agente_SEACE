@@ -356,54 +356,6 @@ function renderOfficialDocuments(item, documentsOverride = null) {
   }).join('')}</div>`;
 }
 
-function renderTechnicalSummary(summary = {}) {
-  const labels = {
-    pilotes: 'Pilotes', zapatas: 'Zapatas', estribos: 'Estribos', tablero: 'Tablero',
-    vigas: 'Vigas', planos: 'Planos', metrados: 'Metrados', presupuesto: 'Presupuesto', expediente_tecnico: 'Expediente técnico', cimentacion: 'Cimentación',
-  };
-  return `<div class="technical-signals eto-summary">${Object.entries(labels).map(([key, label]) => {
-    const status = summary[key] || 'not_analyzed';
-    const text = status === 'detected' ? 'detectado' : status === 'not_detected' ? 'no detectado' : 'pendiente';
-    const css = status === 'detected' ? 'detected' : status === 'not_detected' ? 'not-detected' : 'pending';
-    return `<span class="signal ${css}">${label}: ${text}</span>`;
-  }).join('')}</div>`;
-}
-
-function renderTechnicalFile(item, payload = null) {
-  if (!payload) return '<p>Consultando Expediente Técnico de Obra (ETO)…</p>';
-  const documents = payload.documents || [];
-  const guides = payload.official_guides || [];
-  return `<div class="document-help eto-help">
-    <p><strong>Expediente Técnico de Obra:</strong> capa separada para obras. Según OECE, aparece en la Ficha de Selección cuando el procedimiento de Obra tiene registrada la opción “Ver Expediente Técnico de Obra”.</p>
-    <p class="muted-copy">Estado: ${escapeHtml(payload.status)} · ${escapeHtml(payload.message || '')}</p>
-  </div>
-  ${renderTechnicalSummary(payload.technical_summary)}
-  <details class="eto-sections" open>
-    <summary>Secciones oficiales del ETO</summary>
-    ${(payload.sections || []).map(section => `<div class="eto-section"><strong>${escapeHtml(section.title)}</strong><ul>${(section.official_components || []).map(component => `<li>${escapeHtml(component)}</li>`).join('')}</ul></div>`).join('')}
-  </details>
-  ${documents.length ? `<div class="document-list">${documents.map(document => {
-    const url = document.download_url || document.preview_url || '';
-    const proxyUrl = `/api/documents/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(document.suggested_filename || document.title || 'eto-documento')}`;
-    return `<article class="document-card eto-card">
-      <div>
-        <div class="doc-title-row"><strong>${escapeHtml(document.title || 'Documento ETO')}</strong>${documentStatus(document)}</div>
-        <p>${escapeHtml(document.eto_component || 'eto')} · ${escapeHtml((document.format || '').toUpperCase() || 'archivo')} · ${formatDate(document.date_published)}</p>
-        <small>${escapeHtml(document.verification?.message || 'Pendiente de verificar antes de descargar.')}</small>
-        ${document.analysis?.message ? `<p class="muted-copy">${escapeHtml(document.analysis.message)}</p>` : ''}
-        ${technicalSignalsSummary(document.analysis)}
-      </div>
-      <div class="document-actions">
-        <a class="ghost action-link" href="${escapeHtml(url || '#')}" target="_blank" rel="noopener noreferrer">Ver</a>
-        <button class="ghost" data-eto-action="verify" data-eto-ocid="${escapeHtml(item.ocid)}">Verificar ETO</button>
-        <button class="ghost" data-eto-action="analyze" data-eto-ocid="${escapeHtml(item.ocid)}">Analizar ETO</button>
-        <a class="download-link" href="${escapeHtml(proxyUrl)}" download>Descargar verificada</a>
-      </div>
-    </article>`;
-  }).join('')}</div>` : `<div class="document-help"><p>No se detectaron archivos ETO en OCDS. Revisa la <strong>Ficha de Selección</strong> oficial y busca el ícono “Ver Expediente Técnico de Obra”.</p></div>`}
-  ${guides.map(guide => `<p class="muted-copy"><a href="${escapeHtml(guide.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(guide.title)}</a></p>`).join('')}`;
-}
-
 async function openDetail(ocid) {
   const response = await fetch(`/api/opportunities/${encodeURIComponent(ocid)}`);
   if (!response.ok) return;
@@ -455,10 +407,6 @@ async function openDetail(ocid) {
         <div id="eto-content"></div>
       </div>
     </div>
-    <div class="panel" id="technical-file-panel">
-      <h2>Expediente Técnico de Obra</h2>
-      <div id="technical-file-content">${renderTechnicalFile(item)}</div>
-    </div>
   </section>
   <section class="dashboard-grid two">
     <div class="panel wide-panel" id="ficha-viewer-panel" hidden>
@@ -476,7 +424,6 @@ async function openDetail(ocid) {
   </section>`;
   setView('detail-view');
   loadOfficialDocuments(item.ocid, false);
-  loadTechnicalFile(item.ocid, false);
 }
 
 async function loadOfficialDocuments(ocid, analyze = false) {
@@ -495,20 +442,6 @@ async function loadOfficialDocuments(ocid, analyze = false) {
     }
   } catch (error) {
     container.innerHTML = `<p>No se pudieron verificar documentos. No debe consumirse descarga. ${escapeHtml(error.message)}</p>`;
-  }
-}
-
-async function loadTechnicalFile(ocid, analyze = false) {
-  const container = byId('technical-file-content');
-  if (!container || !ocid) return;
-  container.innerHTML = '<p>Consultando Expediente Técnico de Obra (ETO)…</p>';
-  try {
-    const response = await fetch(`/api/opportunities/${encodeURIComponent(ocid)}/eto?verify=true&analyze=${analyze ? 'true' : 'false'}`);
-    if (!response.ok) throw new Error('No se pudo consultar el ETO');
-    const payload = await response.json();
-    container.innerHTML = renderTechnicalFile({ ocid }, payload);
-  } catch (error) {
-    container.innerHTML = `<p>No se pudo consultar el ETO. ${escapeHtml(error.message)}</p>`;
   }
 }
 
@@ -988,7 +921,6 @@ function bindEvents() {
     const dismissTarget = event.target.closest('[data-dismiss-ocid]');
     const restoreTarget = event.target.closest('[data-restore-ocid]');
     const docActionTarget = event.target.closest('[data-doc-action]');
-    const etoActionTarget = event.target.closest('[data-eto-action]');
     const fichaTarget = event.target.closest('[data-ficha-ocid]');
     const captureFichaTarget = event.target.closest('[data-capture-ficha-ocid]');
     const loadEtoTarget = event.target.closest('[data-load-eto]');
@@ -1002,7 +934,6 @@ function bindEvents() {
     if (dismissTarget) dismissOcid(dismissTarget.dataset.dismissOcid, dismissTarget);
     if (restoreTarget) restoreDismissedOcid(restoreTarget.dataset.restoreOcid, restoreTarget);
     if (docActionTarget) loadOfficialDocuments(docActionTarget.dataset.docOcid, docActionTarget.dataset.docAction === 'analyze');
-    if (etoActionTarget) loadTechnicalFile(etoActionTarget.dataset.etoOcid, etoActionTarget.dataset.etoAction === 'analyze');
     if (fichaTarget) loadFichaViewer(fichaTarget.dataset.fichaOcid);
     if (captureFichaTarget) loadFichaCapture(captureFichaTarget.dataset.captureFichaOcid);
     if (loadEtoTarget) loadEto(loadEtoTarget.dataset.loadEto, loadEtoTarget);

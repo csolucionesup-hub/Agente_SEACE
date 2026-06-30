@@ -97,8 +97,6 @@ def test_frontend_static_contract_exists():
     assert "Pilotes" in script
     assert "no consume créditos ni descargas" in script
     assert "Expediente Técnico de Obra" in script
-    assert "/eto?verify=true" in script
-    assert "renderTechnicalFile" in script
     assert "Planos" in script
     assert "Metrados" in script
     assert "Presupuesto" in script
