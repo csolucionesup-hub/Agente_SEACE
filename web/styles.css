@@ -374,3 +374,20 @@ body.locked { overflow: hidden; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ghost.small { padding: 5px 10px; font-size: 12px; }
+
+/* Expediente Tecnico de Obra (ETO): grupos colapsables por categoria */
+.eto-section { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 16px; }
+.eto-group { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; background: var(--surface); overflow: hidden; }
+.eto-group > summary {
+  cursor: pointer; padding: 11px 14px; font-weight: 600; color: var(--text);
+  list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.eto-group > summary:hover { background: var(--surface-2); }
+.eto-group > summary::-webkit-details-marker { display: none; }
+.eto-group[open] > summary { border-bottom: 1px solid var(--line); }
+.eto-count { background: var(--brand); color: #fff; border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 600; }
+.eto-files { padding: 4px 14px 12px; }
+.eto-file { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); }
+.eto-file:first-child { border-top: none; }
+.eto-file-meta { min-width: 0; word-break: break-word; }
+.eto-file-meta small { color: var(--muted); }

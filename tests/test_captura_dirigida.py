@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import datetime
 
-from agente_seace import _base_nomenclatura, _derive_year_from_nomenclatura, _termino_busqueda_obra
+from agente_seace import _base_nomenclatura, _derive_year_from_nomenclatura, _parse_eto_doc, _termino_busqueda_obra
 
 
 def test_year_se_deriva_de_la_nomenclatura():
@@ -66,3 +66,20 @@ def test_base_nomenclatura_no_se_come_el_anio():
     # Si el sufijo es el año, NO se debe quitar (no hay 20XX antes que sobreviva).
     assert _base_nomenclatura("AS-1-2025") == "AS-1-2025"
     assert _base_nomenclatura("") == ""
+
+
+def test_parse_eto_doc_privado_flag3_sin_url():
+    # Caso real del ETO: descarga privada por sesión (flag 3) y 3er argumento vacío.
+    onclick = ("javascript:descargaDocGeneral('45346b46-3b4a-4b40-89aa-77c716dbaaea','3','');;"
+               "PrimeFaces.ab({source:'frm:tbDetalleTecnicoObra:dsMemoriaETO:0:j_idt221'});return false;")
+    doc_id, flag, url = _parse_eto_doc(onclick)
+    assert doc_id == "45346b46-3b4a-4b40-89aa-77c716dbaaea"
+    assert flag == "3"
+    assert url == ""
+
+
+def test_parse_eto_doc_con_url_directa():
+    onclick = "javascript:descargaDocGeneral('id-1','1','https://prod2.seace.gob.pe/archivo/x.pdf')"
+    doc_id, flag, url = _parse_eto_doc(onclick)
+    assert doc_id == "id-1"
+    assert url == "https://prod2.seace.gob.pe/archivo/x.pdf"

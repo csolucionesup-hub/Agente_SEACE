@@ -274,6 +274,76 @@ def test_api_opportunity_ficha_capture_reports_service_failure(tmp_path):
     assert "SEACE no respondió" in response.json()["detail"]
 
 
+class FakeEtoScrapeService:
+    def __call__(self, opportunity):
+        return [
+            {"categoria": "Memoria descriptiva", "archivos": [
+                {"nombre": "MEMORIA DE ARQUITECTURA.pdf", "doc_id": "abc-123", "url": "", "session_only": True, "fecha": "16/03/2026", "tamano_kb": "444.9"},
+            ]},
+            {"categoria": "Presupuesto de Obra", "archivos": [
+                {"nombre": "PRESUPUESTO DE OBRA.pdf", "doc_id": "def-456", "url": "", "session_only": True, "fecha": "16/03/2026", "tamano_kb": "2621.5"},
+            ]},
+        ]
+
+
+class FakeEtoDownloadService:
+    def __call__(self, opportunity, doc_id, output_dir):
+        output_dir.mkdir(parents=True, exist_ok=True)
+        target = output_dir / f"{doc_id}.pdf"
+        target.write_bytes(b"fake-eto-pdf")
+        return str(target)
+
+
+def test_api_eto_scrape_returns_grouped_documents(tmp_path):
+    dashboard_path = tmp_path / "dashboard.json"
+    write_dashboard(dashboard_path)
+    client = TestClient(create_app(dashboard_path=dashboard_path, eto_scrape_service=FakeEtoScrapeService()))
+
+    response = client.post("/api/opportunities/ocds-test-1/eto/scrape")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 2
+    assert [g["categoria"] for g in data["grupos"]] == ["Memoria descriptiva", "Presupuesto de Obra"]
+    assert data["grupos"][0]["archivos"][0]["doc_id"] == "abc-123"
+
+
+def test_api_eto_scrape_reports_failure(tmp_path):
+    class Broken:
+        def __call__(self, opportunity):
+            raise RuntimeError("SEACE bloqueó el scraping")
+
+    dashboard_path = tmp_path / "dashboard.json"
+    write_dashboard(dashboard_path)
+    client = TestClient(create_app(dashboard_path=dashboard_path, eto_scrape_service=Broken()))
+
+    response = client.post("/api/opportunities/ocds-test-1/eto/scrape")
+
+    assert response.status_code == 502
+    assert "SEACE bloqueó el scraping" in response.json()["detail"]
+
+
+def test_api_eto_download_streams_the_file(tmp_path):
+    dashboard_path = tmp_path / "dashboard.json"
+    write_dashboard(dashboard_path)
+    client = TestClient(create_app(dashboard_path=dashboard_path, eto_download_service=FakeEtoDownloadService()))
+
+    response = client.get("/api/opportunities/ocds-test-1/eto/download", params={"doc_id": "abc-123", "nombre": "memoria.pdf"})
+
+    assert response.status_code == 200
+    assert response.content == b"fake-eto-pdf"
+
+
+def test_api_eto_download_requires_doc_id(tmp_path):
+    dashboard_path = tmp_path / "dashboard.json"
+    write_dashboard(dashboard_path)
+    client = TestClient(create_app(dashboard_path=dashboard_path))
+
+    response = client.get("/api/opportunities/ocds-test-1/eto/download", params={"doc_id": "   "})
+
+    assert response.status_code == 400
+
+
 def test_api_exports_opportunity_expediente_json(tmp_path):
     dashboard_path = tmp_path / "dashboard.json"
     write_dashboard(dashboard_path)

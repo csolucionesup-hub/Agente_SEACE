@@ -446,6 +446,249 @@ async def capturar_obra_standalone(
             await browser.close()
 
 
+# Categorías del Expediente Técnico de Obra (legends de los fieldsets en SEACE) que se
+# traen al panel: técnicas + económicas. Lo administrativo (aprobación, funcionario,
+# licencias, etc.) se omite por defecto.
+ETO_CATEGORIAS_TECNICAS_ECONOMICAS = [
+    "Memoria descriptiva",
+    "Especificaciones Técnicas",
+    "Planos de ejecución de obra",
+    "Metrados",
+    "Presupuesto de Obra",
+    "Análisis de precios",
+    "Estudios Técnicos",
+    "Gestión de riesgos",
+    "Fórmulas polinómicas",
+]
+
+
+def _parse_eto_doc(onclick: str) -> tuple[str, str, str]:
+    """Parsea ``descargaDocGeneral('<id>', <flag>, '<url>')`` → (doc_id, flag, url).
+
+    La función JS de SEACE: si ``flag == 3`` la descarga es privada por sesión (solo id, sin
+    URL directa); si no, hace ``window.open('<url>')`` — ese 3er argumento es la URL directa
+    descargable. Devolvemos los tres para decidir en el front (link directo vs respaldo).
+    """
+    # descargaDocGeneral('<id>', '<flag>', '<url>'[, ...]) — todos los args van entrecomillados.
+    args = re.findall(r"'([^']*)'", onclick or "")
+    doc_id = args[0] if args else ""
+    flag = args[1] if len(args) > 1 else ""
+    url = ""
+    for candidate in args[2:]:
+        if candidate.startswith("http") or "/" in candidate or candidate.lower().endswith(
+            (".pdf", ".rar", ".zip", ".doc", ".docx", ".dwg", ".xls", ".xlsx")
+        ):
+            url = candidate
+            break
+    return doc_id, flag, url
+
+
+def _eto_browser_args() -> list[str]:
+    return ['--ssl-version-min=tls1', '--ignore-certificate-errors', '--window-size=1280,720', '--no-sandbox']
+
+
+async def _navegar_al_eto(page: Page, nomenclatura: str, descripcion: str, entity_name: str, year: int | None, seace_url: str) -> bool:
+    """Navega Buscador → ficha (icono) → 'Ver Expediente Técnico de Obra'. Deja la página en
+    el ETO y devuelve True si llegó. Compartida por el listado y la descarga del ETO."""
+    nomen = (nomenclatura or "").strip()
+    if not nomen:
+        return False
+    anio = _derive_year_from_nomenclatura(nomen, fallback=year)
+    termino = _termino_busqueda_obra(descripcion, nomen)
+    nomen_base = _base_nomenclatura(nomen)
+
+    await page.goto(seace_url, wait_until="domcontentloaded", timeout=45000)
+    await page.wait_for_timeout(3000)
+    tab_ok = False
+    for _ in range(5):
+        try:
+            await page.locator("li[role='tab']:has-text('Buscador de Procedimientos de Selección')").first.click(force=True)
+            await page.wait_for_timeout(1000)
+            tab_ok = True
+            break
+        except Exception:
+            await page.wait_for_timeout(1000)
+    if not tab_ok:
+        return False
+    await page.wait_for_timeout(3000)
+    await seleccionar_opcion_primefaces(page, "Objeto de Contratación", "Obra")
+    await seleccionar_opcion_primefaces(page, "Año de la Convocatoria", str(anio))
+    await seleccionar_opcion_primefaces(page, "Version SEACE", "Seace 3")
+    panel = page.locator('.ui-tabs-panel:visible').first
+    inp = panel.locator('input[id$=":descripcionObjeto"]').first
+    await inp.click()
+    await page.keyboard.press("Control+A")
+    await page.keyboard.press("Backspace")
+    await inp.fill(termino, timeout=15000)
+    await page.wait_for_timeout(1000)
+    await panel.locator('button:has-text("Buscar"), button[id$="btnBuscarSelToken"]').first.click(force=True)
+    await esperar_procesamiento(page)
+    await page.wait_for_timeout(3500)
+
+    row_selector = 'tbody[id$="dtProcesos_data"] tr.ui-widget-content'
+    count = await page.locator(row_selector).count()
+    idx = None
+    for objetivo in ([nomen] if nomen_base == nomen else [nomen, nomen_base]):
+        for i in range(count):
+            try:
+                if objetivo in await page.locator(row_selector).nth(i).inner_text():
+                    idx = i
+                    break
+            except Exception:
+                continue
+        if idx is not None:
+            break
+    if idx is None:
+        logger.warning("ETO: no se encontró la fila de %s", nomen)
+        return False
+    fila = page.locator(row_selector).nth(idx)
+    btn_ficha = fila.locator('td').last.locator('a, button').filter(
+        has=page.locator('img[src*="ficha"], img[src*="cronograma"], .ui-icon-calendar, [title*="Ficha"], [title*="Cronograma"]')
+    ).first
+    await page.wait_for_timeout(3000)
+    await btn_ficha.click(timeout=10000)
+    await page.wait_for_selector('text="Regresar"', state="visible", timeout=30000)
+    await page.wait_for_timeout(3000)
+
+    eto_btn = page.locator(":text('Ver Expediente Técnico de Obra')").first
+    if not await eto_btn.is_visible():
+        logger.info("ETO: la obra %s no tiene 'Ver Expediente Técnico de Obra'.", nomen)
+        return False
+    await eto_btn.click(force=True)
+    await page.wait_for_timeout(6000)
+    return True
+
+
+async def scrapear_eto_obra(
+    nomenclatura: str,
+    descripcion: str,
+    entity_name: str = "",
+    year: int | None = None,
+    categorias: list[str] | None = None,
+    seace_url: str = DEFAULT_SEACE_URL,
+    headless: bool = True,
+) -> list[dict]:
+    """Devuelve los documentos del Expediente Técnico de Obra agrupados por categoría.
+
+    Ruta SEACE: Buscador → ficha (icono) → 'Ver Expediente Técnico de Obra' → lee los
+    fieldsets de las categorías pedidas (por defecto técnicas + económicas). Devuelve
+    ``[{categoria, archivos: [{nombre, doc_id, fecha, tamano_kb}]}]`` (solo categorías con
+    archivos). Local-only (SEACE bloquea servidores). Navega por su cuenta; gestiona el browser.
+    """
+    nomen = (nomenclatura or "").strip()
+    if not nomen:
+        return []
+    wanted = {c.strip().lower() for c in (categorias or ETO_CATEGORIAS_TECNICAS_ECONOMICAS)}
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=headless, args=_eto_browser_args())
+        page = await (await browser.new_context(ignore_https_errors=True)).new_page()
+        try:
+            if not await _navegar_al_eto(page, nomenclatura, descripcion, entity_name, year, seace_url):
+                return []
+
+            resultado: list[dict] = []
+            fieldsets = page.locator(".ui-fieldset")
+            fcount = await fieldsets.count()
+            for i in range(fcount):
+                fs = fieldsets.nth(i)
+                try:
+                    legend = (await fs.locator(".ui-fieldset-legend").first.inner_text()).strip()
+                except Exception:
+                    continue
+                if legend.lower() not in wanted:
+                    continue
+                archivos: list[dict] = []
+                anchors = fs.locator("a[onclick*='descargaDocGeneral']")
+                for j in range(await anchors.count()):
+                    a = anchors.nth(j)
+                    try:
+                        nombre = (await a.inner_text()).strip()
+                        onclick = await a.get_attribute("onclick") or ""
+                    except Exception:
+                        continue
+                    doc_id, flag, url = _parse_eto_doc(onclick)
+                    fecha = tamano = ""
+                    try:
+                        celdas = a.locator("xpath=ancestor::tr[1]").locator("td")
+                        cc = await celdas.count()
+                        if cc >= 4:
+                            fecha = (await celdas.nth(cc - 2).inner_text()).strip()
+                            tamano = (await celdas.nth(cc - 1).inner_text()).strip()
+                    except Exception:
+                        pass
+                    if nombre and doc_id:
+                        archivos.append({
+                            "nombre": nombre,
+                            "doc_id": doc_id,
+                            "url": url,
+                            "session_only": flag == "3" or not url,
+                            "fecha": fecha,
+                            "tamano_kb": tamano,
+                        })
+                if archivos:
+                    resultado.append({"categoria": legend, "archivos": archivos})
+            return resultado
+        finally:
+            await browser.close()
+
+
+async def descargar_doc_eto(
+    nomenclatura: str,
+    descripcion: str,
+    doc_id: str,
+    entity_name: str = "",
+    year: int | None = None,
+    output_dir: os.PathLike | str = ".",
+    seace_url: str = DEFAULT_SEACE_URL,
+    headless: bool = True,
+) -> str | None:
+    """Descarga UN documento del ETO (por su ``doc_id``) re-navegando SEACE en vivo.
+
+    Bajo demanda: el usuario pide un archivo puntual y LicitaScan abre el navegador, llega al
+    ETO, hace clic en ese documento y captura la descarga (la descarga es privada/por sesión,
+    así que hay que dispararla dentro del navegador). Devuelve la ruta local o None. Local-only.
+    """
+    if not (nomenclatura or "").strip() or not (doc_id or "").strip():
+        return None
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=headless, args=_eto_browser_args())
+        context = await browser.new_context(ignore_https_errors=True, accept_downloads=True)
+        page = await context.new_page()
+        try:
+            if not await _navegar_al_eto(page, nomenclatura, descripcion, entity_name, year, seace_url):
+                return None
+            anchor = page.locator("a[onclick*='%s']" % doc_id).first
+            if not await anchor.count():
+                logger.warning("ETO descarga: doc_id %s no encontrado en la página.", doc_id)
+                return None
+            # Los documentos viven en pestañas (Sección 1-4); el de otra sección está oculto y
+            # un click físico falla ("element not visible"). Ejecutamos su onclick directamente
+            # por JS (descargaPriv + PrimeFaces.ab), que NO requiere visibilidad y dispara la
+            # misma descarga por sesión. Leer el atributo sí funciona en elementos ocultos.
+            onclick = await anchor.get_attribute("onclick") or ""
+            js = onclick.replace("javascript:", "").strip()
+            if js.endswith("return false;"):
+                js = js[: -len("return false;")].strip()
+            if not js:
+                logger.warning("ETO descarga: el doc %s no tiene onclick utilizable.", doc_id)
+                return None
+            os.makedirs(output_dir, exist_ok=True)
+            try:
+                async with page.expect_download(timeout=120000) as dl_info:
+                    await page.evaluate(js)
+                download = await dl_info.value
+            except Exception as exc:  # noqa: BLE001
+                logger.error("ETO descarga: no se disparó la descarga del doc %s: %s", doc_id, exc)
+                return None
+            nombre = download.suggested_filename or ("%s.bin" % doc_id)
+            destino = os.path.join(output_dir, nombre)
+            await download.save_as(destino)
+            return destino if os.path.exists(destino) else None
+        finally:
+            await browser.close()
+
+
 async def scanear_resultados(page: Page, keyword: str, year: int, drive_handler: GDriveHandler | None, folder_id: str | None, config: RuntimeConfig, captures_taken: int = 0):
     """Escanea la tabla y gestiona hallazgos. Retorna cantidad de capturas nuevas."""
     captured_count = 0

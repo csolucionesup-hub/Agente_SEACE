@@ -449,6 +449,11 @@ async function openDetail(ocid) {
     <div class="panel" id="official-documents-panel">
       <h2>Documentos oficiales</h2>
       <div id="official-documents-content">${renderOfficialDocuments(item)}</div>
+      <div class="eto-section">
+        <button class="primary-action" type="button" data-load-eto="${escapeHtml(item.ocid)}">Traer documentos del Expediente Técnico</button>
+        <p class="muted-copy">Documentos técnicos del ETO (Memoria, Especificaciones, Planos, Metrados, Presupuesto, Análisis de precios…). Tarda ~1 min: navega SEACE en vivo.</p>
+        <div id="eto-content"></div>
+      </div>
     </div>
     <div class="panel" id="technical-file-panel">
       <h2>Expediente Técnico de Obra</h2>
@@ -565,6 +570,72 @@ async function loadFichaCapture(ocid) {
     container.innerHTML = renderFichaCapture(payload);
   } catch (error) {
     container.innerHTML = `<div class="document-help"><p>No se pudo automatizar la ficha SEACE. Mantén el visor manual como respaldo.</p><p class="muted-copy">${escapeHtml(error.message)}</p></div>`;
+  }
+}
+
+async function loadEto(ocid, btn) {
+  const container = byId('eto-content');
+  if (!container || !ocid) return;
+  btn.disabled = true;
+  btn.textContent = 'Trayendo del ETO… (~1 min)';
+  container.innerHTML = '<p>📂 Navegando SEACE y leyendo el Expediente Técnico de Obra… puede tardar ~1 minuto.</p>';
+  try {
+    const response = await fetch(`/api/opportunities/${encodeURIComponent(ocid)}/eto/scrape`, { method: 'POST' });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || 'No se pudo leer el Expediente Técnico');
+    }
+    const data = await response.json();
+    container.innerHTML = renderEto(ocid, data);
+    btn.disabled = false;
+    btn.textContent = 'Actualizar Expediente Técnico';
+  } catch (error) {
+    container.innerHTML = `<div class="document-help"><p>No se pudo traer el Expediente Técnico. ${escapeHtml(error.message)}</p><p class="muted-copy">El ETO solo funciona en local (SEACE bloquea servidores).</p></div>`;
+    btn.disabled = false;
+    btn.textContent = 'Reintentar';
+  }
+}
+
+function renderEto(ocid, data) {
+  const grupos = data.grupos || [];
+  if (!grupos.length) {
+    return '<p>No se encontraron documentos del Expediente Técnico para esta obra.</p>';
+  }
+  const cuerpo = grupos.map(grupo => `
+    <details class="eto-group">
+      <summary>${escapeHtml(grupo.categoria)} <span class="eto-count">${(grupo.archivos || []).length}</span></summary>
+      <div class="eto-files">
+        ${(grupo.archivos || []).map(archivo => `
+          <div class="eto-file">
+            <div class="eto-file-meta"><strong>${escapeHtml(archivo.nombre)}</strong><br><small>${escapeHtml(archivo.fecha || '')}${archivo.tamano_kb ? ' · ' + escapeHtml(archivo.tamano_kb) + ' KB' : ''}</small></div>
+            <button class="ghost" type="button" data-eto-download="${escapeHtml(archivo.doc_id)}" data-eto-ocid="${escapeHtml(ocid)}" data-eto-nombre="${escapeHtml(archivo.nombre)}">Descargar</button>
+          </div>`).join('')}
+      </div>
+    </details>`).join('');
+  return `<p class="muted-copy">${data.total || 0} documento(s) del Expediente Técnico, agrupados por categoría (clic para expandir):</p>${cuerpo}`;
+}
+
+async function descargarEto(ocid, docId, nombre, btn) {
+  if (!ocid || !docId) return;
+  btn.disabled = true;
+  btn.textContent = 'Descargando… (~1 min)';
+  try {
+    const url = `/api/opportunities/${encodeURIComponent(ocid)}/eto/download?doc_id=${encodeURIComponent(docId)}&nombre=${encodeURIComponent(nombre || '')}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('No se pudo descargar');
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = nombre || 'documento-eto';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(objectUrl);
+    btn.textContent = 'Descargado ✓';
+  } catch (error) {
+    btn.textContent = 'Reintentar';
+    btn.disabled = false;
   }
 }
 
@@ -920,6 +991,8 @@ function bindEvents() {
     const etoActionTarget = event.target.closest('[data-eto-action]');
     const fichaTarget = event.target.closest('[data-ficha-ocid]');
     const captureFichaTarget = event.target.closest('[data-capture-ficha-ocid]');
+    const loadEtoTarget = event.target.closest('[data-load-eto]');
+    const etoDownloadTarget = event.target.closest('[data-eto-download]');
     const copyProcessTarget = event.target.closest('[data-copy-process]');
     if (viewTarget) setView(viewTarget.dataset.viewTarget);
     if (navTarget) setView(navTarget.dataset.view);
@@ -932,6 +1005,8 @@ function bindEvents() {
     if (etoActionTarget) loadTechnicalFile(etoActionTarget.dataset.etoOcid, etoActionTarget.dataset.etoAction === 'analyze');
     if (fichaTarget) loadFichaViewer(fichaTarget.dataset.fichaOcid);
     if (captureFichaTarget) loadFichaCapture(captureFichaTarget.dataset.captureFichaOcid);
+    if (loadEtoTarget) loadEto(loadEtoTarget.dataset.loadEto, loadEtoTarget);
+    if (etoDownloadTarget) descargarEto(etoDownloadTarget.dataset.etoOcid, etoDownloadTarget.dataset.etoDownload, etoDownloadTarget.dataset.etoNombre, etoDownloadTarget);
     if (copyProcessTarget && copyProcessTarget.dataset.copyProcess) {
       navigator.clipboard?.writeText(copyProcessTarget.dataset.copyProcess);
       copyProcessTarget.textContent = 'Nomenclatura copiada';

@@ -47,6 +47,12 @@ def test_frontend_static_contract_exists():
     assert "renderFichaCapture" in script
     assert "ficha-capture-image" in script
     assert "Documentos oficiales" in html
+    assert "Traer documentos del Expediente Técnico" in script
+    assert "renderEto" in script
+    assert "descargarEto" in script
+    assert "/eto/scrape" in script
+    assert "/eto/download" in script
+    assert "data-eto-download" in script
     assert "/api/opportunities/" in script
     assert "/export" in script
     assert "/api/search" in script

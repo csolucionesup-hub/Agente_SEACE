@@ -12,6 +12,7 @@ import hmac
 import io
 import json
 import os
+from contextlib import contextmanager
 import tempfile
 import threading
 import time
@@ -396,6 +397,77 @@ def _default_ficha_capture_service(opportunity: dict[str, Any], output_dir: Path
     }
 
 
+@contextmanager
+def _playwright_libs_env():
+    """Asegura que Playwright encuentre las libs del navegador (instaladas fuera del path
+    estándar en la PC del usuario / WSL). Restaura el entorno al salir."""
+    old_platform = os.environ.get("PLAYWRIGHT_HOST_PLATFORM_OVERRIDE")
+    old_ld = os.environ.get("LD_LIBRARY_PATH")
+    os.environ.setdefault("PLAYWRIGHT_HOST_PLATFORM_OVERRIDE", "ubuntu24.04-x64")
+    libs = "/home/hermesagente2026/.local/playwright-libs/lib"
+    if Path(libs).exists() and libs not in (old_ld or ""):
+        os.environ["LD_LIBRARY_PATH"] = f"{libs}:{old_ld}" if old_ld else libs
+    try:
+        yield
+    finally:
+        if old_platform is None:
+            os.environ.pop("PLAYWRIGHT_HOST_PLATFORM_OVERRIDE", None)
+        else:
+            os.environ["PLAYWRIGHT_HOST_PLATFORM_OVERRIDE"] = old_platform
+        if old_ld is None:
+            os.environ.pop("LD_LIBRARY_PATH", None)
+        else:
+            os.environ["LD_LIBRARY_PATH"] = old_ld
+
+
+def _default_eto_scrape_service(opportunity: dict[str, Any]) -> list[dict[str, Any]]:
+    """Lista los documentos del Expediente Técnico de Obra agrupados por categoría.
+
+    Scrapea SEACE (Buscador → ficha → 'Ver Expediente Técnico de Obra'). Local-only: en
+    datacenter (Railway) falla porque SEACE bloquea y no hay navegador → el endpoint da 502.
+    """
+    import asyncio
+
+    try:
+        from agente_seace import scrapear_eto_obra
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("Playwright no está disponible para leer el Expediente Técnico") from exc
+
+    process_code = str(opportunity.get("process_code") or "").strip()
+    description = str(opportunity.get("description") or "").strip()
+    entity_name = str(opportunity.get("entity_name") or "").strip()
+    if not process_code:
+        raise RuntimeError("La oportunidad no tiene nomenclatura para buscar en SEACE")
+    with _playwright_libs_env():
+        grupos = asyncio.run(scrapear_eto_obra(
+            nomenclatura=process_code, descripcion=description, entity_name=entity_name,
+        ))
+    return grupos or []
+
+
+def _default_eto_download_service(opportunity: dict[str, Any], doc_id: str, output_dir: Path) -> str | None:
+    """Descarga UN documento del ETO (por doc_id) re-navegando SEACE. Devuelve la ruta local."""
+    import asyncio
+
+    try:
+        from agente_seace import descargar_doc_eto
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("Playwright no está disponible para descargar del Expediente Técnico") from exc
+
+    process_code = str(opportunity.get("process_code") or "").strip()
+    description = str(opportunity.get("description") or "").strip()
+    entity_name = str(opportunity.get("entity_name") or "").strip()
+    if not process_code or not str(doc_id or "").strip():
+        raise RuntimeError("Faltan datos (nomenclatura o doc_id) para descargar del ETO")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with _playwright_libs_env():
+        path = asyncio.run(descargar_doc_eto(
+            nomenclatura=process_code, descripcion=description, doc_id=str(doc_id),
+            entity_name=entity_name, output_dir=str(output_dir),
+        ))
+    return path
+
+
 def _documents_from_record_or_dashboard(api_client: Any, opportunity: dict[str, Any]) -> list[dict[str, Any]]:
     ocid = str(opportunity.get("ocid") or "").strip()
     if api_client and ocid:
@@ -705,6 +777,8 @@ def create_app(
     settings_path: str | Path = DEFAULT_SETTINGS_PATH,
     seace_client: Any | None = None,
     ficha_capture_service: Any | None = None,
+    eto_scrape_service: Any | None = None,
+    eto_download_service: Any | None = None,
     api_key: str | None = None,
     search_cache_ttl: float = DEFAULT_SEARCH_CACHE_TTL,
     search_deadline: float = DEFAULT_SEARCH_DEADLINE,
@@ -720,6 +794,8 @@ def create_app(
     settings_path = Path(settings_path)
     api_client = seace_client or SeaceApiClient()
     capture_service = ficha_capture_service or _default_ficha_capture_service
+    eto_scrape = eto_scrape_service or _default_eto_scrape_service
+    eto_download = eto_download_service or _default_eto_download_service
     configured_api_key = (api_key if api_key is not None else os.getenv("LICITASCAN_API_KEY", "")) or ""
     supabase_auth = SupabaseAuth(supabase_url, supabase_anon_key, verify=supabase_verify)
     search_cache = _TTLCache(search_cache_ttl)
@@ -1060,6 +1136,38 @@ def create_app(
             verifier=verify_document_link,
             analyzer=analyze_document,
         )
+
+    @app.post("/api/opportunities/{ocid}/eto/scrape")
+    def opportunity_eto_scrape(ocid: str) -> dict[str, Any]:
+        """Lista los documentos del Expediente Técnico de Obra agrupados por categoría.
+
+        Scrapea SEACE en vivo (~1 min). Bajo demanda (el front lo dispara con un botón).
+        """
+        data = load_dashboard(dashboard_path)
+        opportunity = _find_opportunity(data, ocid)
+        try:
+            grupos = eto_scrape(opportunity)
+        except Exception as exc:  # noqa: BLE001 - fallo de automatización visible al usuario
+            raise HTTPException(status_code=502, detail=f"No se pudo leer el Expediente Técnico en SEACE: {exc}") from exc
+        total = sum(len(grupo.get("archivos") or []) for grupo in grupos)
+        return {"ocid": ocid, "grupos": grupos, "total": total}
+
+    @app.get("/api/opportunities/{ocid}/eto/download")
+    def opportunity_eto_download(ocid: str, doc_id: str, nombre: str = "") -> Response:
+        """Descarga bajo demanda UN documento del ETO (re-navega SEACE, ~1 min)."""
+        if not doc_id.strip():
+            raise HTTPException(status_code=400, detail="doc_id is required")
+        data = load_dashboard(dashboard_path)
+        opportunity = _find_opportunity(data, ocid)
+        eto_dir = Path(tempfile.gettempdir()) / "licitascan-eto"
+        try:
+            path = eto_download(opportunity, doc_id, eto_dir)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"No se pudo descargar el documento del ETO desde SEACE: {exc}") from exc
+        if not path or not Path(path).exists():
+            raise HTTPException(status_code=502, detail="El documento del ETO no pudo descargarse desde SEACE.")
+        resolved = Path(path)
+        return FileResponse(str(resolved), filename=nombre or resolved.name)
 
     @app.get("/api/documents/download")
     def download_document(url: str, filename: str = "") -> Response:
