@@ -33,16 +33,16 @@ def test_frontend_static_contract_exists():
     assert "recommended_action" in script
     assert "official_documents" in script
     assert "official_source_url" in script
-    assert "Ver fuente oficial" in script
+    assert "Ir a SEACE" in script
     assert "Exportar expediente" in script
     assert "Ver ficha SEACE" in script
     assert "/ficha" in script
     assert "renderFichaViewer" in script
-    assert "Buscador Público SEACE" in script
-    assert "seace-iframe" in script
-    assert "Vista oficial embebida" in script
-    assert "iframe" in script
-    assert "Buscar ficha automáticamente" in script
+    assert "Ficha de Selección SEACE" in script
+    assert "ficha-capture-content" in script
+    assert "data-capture-ficha-ocid" in script
+    assert "Abrir en SEACE" in script
+    assert "Volver a capturar" in script
     assert "/ficha/capture" in script
     assert "renderFichaCapture" in script
     assert "ficha-capture-image" in script

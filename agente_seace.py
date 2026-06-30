@@ -163,9 +163,37 @@ async def capturar_ficha_seace(page: Page, keyword: str, institucion: str, year:
         os.makedirs(output_dir, exist_ok=True)
         filepath = os.path.join(output_dir, filename)
         
-        # 4. CAPTURA FULL PAGE: Esto asegura que se vea toda la ficha
-        await page.screenshot(path=filepath, full_page=True)
-        logger.info(f"📸 Captura de ficha realizada localmente: {filename}")
+        # 4. CAPTURA RECORTADA: solo la parte superior de la ficha (Convocatoria +
+        # Cronograma + Entidad Contratante + Información general del procedimiento),
+        # sin la "Lista de Documentos" ni la "Vista de Items" de abajo. Se agranda el
+        # viewport para que toda la zona superior entre y se corta a la altura del
+        # primer bloque de documentos/items; si no se ubica, se cae a full_page.
+        await page.set_viewport_size({"width": 1920, "height": 2600})
+        await page.wait_for_timeout(800)
+        cut_y = await page.evaluate(
+            """() => {
+                const labels = ['Lista de Documentos', 'Vista de Items', 'Vista de Ítems'];
+                let best = null;
+                for (const el of document.querySelectorAll('td, th, span, div, legend, label, h1, h2, h3')) {
+                    const txt = (el.textContent || '').trim();
+                    if (!txt) continue;
+                    if (labels.some(l => txt === l || txt.startsWith(l + ' '))) {
+                        const top = el.getBoundingClientRect().top + window.scrollY;
+                        if (top > 200 && (best === null || top < best)) best = top;
+                    }
+                }
+                return best;
+            }"""
+        )
+        full_width = await page.evaluate(
+            "() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth)"
+        )
+        if cut_y and cut_y > 200:
+            await page.screenshot(path=filepath, clip={"x": 0, "y": 0, "width": full_width, "height": cut_y})
+            logger.info(f"📸 Captura recortada (alto={int(cut_y)}px) realizada localmente: {filename}")
+        else:
+            await page.screenshot(path=filepath, full_page=True)
+            logger.info(f"📸 Captura full-page (no se ubicó corte) realizada localmente: {filename}")
 
         # 5. Subida inmediata a Google Drive
         if drive_handler and folder_id:

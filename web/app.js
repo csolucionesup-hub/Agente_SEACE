@@ -418,7 +418,7 @@ async function openDetail(ocid) {
       <p>${escapeHtml(item.description)}</p>
       <div class="meta">${badge(item.stage)} ${badge(item.outcome)} ${badge(urgency(item).level)} <span class="badge">${escapeHtml(urgency(item).label)}</span> <span class="badge">Score ${escapeHtml(item.commercial_score ?? '—')}</span></div>
       <div class="action-row">
-        <a class="primary-action action-link" href="${escapeHtml(officialSourceUrl)}" target="_blank" rel="noopener noreferrer">Ver fuente oficial</a>
+        <a class="primary-action action-link" href="${escapeHtml(officialSourceUrl)}" target="_blank" rel="noopener noreferrer">Ir a SEACE</a>
         <button class="ghost" data-ficha-ocid="${escapeHtml(item.ocid)}">Ver ficha SEACE</button>
         <a class="ghost action-link" href="${escapeHtml(exportUrl)}" download>Exportar expediente</a>
         <button class="ghost">Marcar como revisado</button>
@@ -508,29 +508,18 @@ async function loadTechnicalFile(ocid, analyze = false) {
 }
 
 function renderFichaViewer(payload) {
-  const embedUrl = payload.embed_url || payload.source_url || '#';
   return `<div class="document-help ficha-help">
-    <p><strong>Buscador Público SEACE:</strong> ${escapeHtml(payload.message || '')}</p>
+    <p><strong>Ficha de Selección SEACE</strong> — captura automática del expediente oficial.</p>
     <div class="kv compact-kv">
       <div><span>Nomenclatura</span><strong>${escapeHtml(payload.process_code || '—')}</strong></div>
       <div><span>Entidad</span><strong>${escapeHtml(payload.entity_name || '—')}</strong></div>
-      <div><span>Modo de visor</span><strong>Vista oficial embebida</strong></div>
     </div>
-    <ol>${(payload.steps || []).map(step => `<li>${escapeHtml(step)}</li>`).join('')}</ol>
     <div class="action-row">
-      <button class="primary-action" type="button" data-capture-ficha-ocid="${escapeHtml(payload.ocid || '')}">Buscar ficha automáticamente</button>
-      <a class="ghost action-link" href="${escapeHtml(payload.source_url || '#')}" target="_blank" rel="noopener noreferrer">Abrir en pestaña externa</a>
+      <button class="ghost" type="button" data-capture-ficha-ocid="${escapeHtml(payload.ocid || '')}">Volver a capturar</button>
+      <a class="ghost action-link" href="${escapeHtml(payload.source_url || '#')}" target="_blank" rel="noopener noreferrer">Abrir en SEACE</a>
       <button class="ghost" type="button" data-copy-process="${escapeHtml(payload.process_code || '')}">Copiar nomenclatura</button>
     </div>
     <div id="ficha-capture-content"></div>
-    <p class="muted-copy">${escapeHtml(payload.note || '')}</p>
-  </div>
-  <div class="seace-iframe-wrap">
-    <div class="iframe-toolbar">
-      <strong>Vista oficial embebida SEACE</strong>
-      <span class="muted-copy">Si el portal no carga por bloqueo del navegador, usa “Abrir en pestaña externa”.</span>
-    </div>
-    <iframe class="seace-iframe" src="${escapeHtml(embedUrl)}" title="Ficha de Selección SEACE" loading="lazy" referrerpolicy="no-referrer-when-downgrade" sandbox="allow-forms allow-scripts allow-same-origin allow-popups allow-downloads"></iframe>
   </div>`;
 }
 
@@ -546,6 +535,7 @@ async function loadFichaViewer(ocid) {
     const payload = await response.json();
     container.innerHTML = renderFichaViewer(payload);
     panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    loadFichaCapture(ocid);
   } catch (error) {
     container.innerHTML = `<p>No se pudo preparar la ficha SEACE. ${escapeHtml(error.message)}</p>`;
   }
@@ -567,7 +557,7 @@ function renderFichaCapture(payload) {
 async function loadFichaCapture(ocid) {
   const container = byId('ficha-capture-content');
   if (!container || !ocid) return;
-  container.innerHTML = '<p>Buscando automáticamente en SEACE y capturando ficha… Esto puede demorar.</p>';
+  container.innerHTML = '<p>📸 Capturando la Ficha de Selección en SEACE… puede tardar ~1 minuto (abre el portal, encuentra la obra y le toma la foto).</p>';
   try {
     const response = await fetch(`/api/opportunities/${encodeURIComponent(ocid)}/ficha/capture`, { method: 'POST' });
     const payload = await response.json();

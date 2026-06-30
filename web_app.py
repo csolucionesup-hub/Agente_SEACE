@@ -299,27 +299,52 @@ def _ficha_payload(opportunity: dict[str, Any]) -> dict[str, Any]:
 
 
 def _default_ficha_capture_service(opportunity: dict[str, Any], output_dir: Path) -> dict[str, Any]:
-    """Open SEACE with Playwright, try to search/open the ficha, and store evidence."""
+    """Captura la Ficha de Selección EXACTA de la obra en SEACE (Playwright) y guarda el PNG.
+
+    Reusa ``agente_seace.capturar_obra_standalone``: busca por descripción + año y
+    selecciona la fila cuya nomenclatura coincide, luego abre la ficha y la fotografía
+    (la misma captura dirigida que usan las alertas de buena pro). Devuelve la ruta del
+    PNG vía ``image_url`` para mostrarlo en la vista de detalle.
+
+    Solo funciona donde haya navegador instalado e IP que SEACE acepte (la PC del
+    usuario en Perú). En datacenter (Railway) SEACE bloquea y no hay navegador → fallará
+    con 502; el front mantiene el link "Abrir en SEACE" como respaldo.
+    """
+    # Obras de SEACE v1/v2 (procesos antiguos) NO están en el Buscador Público v3, así que
+    # su Ficha de Selección nunca se va a poder capturar. Se detecta por el OCID y se corta
+    # de inmediato (sin gastar ~1 min abriendo el navegador en vano).
+    ocid = str(opportunity.get("ocid") or "")
+    if "seacev2" in ocid or "seacev1" in ocid:
+        return {
+            "status": "old_version",
+            "message": "Obra antigua (SEACE v2): su Ficha de Selección no está en el Buscador Público actual. Usa ‘Abrir en SEACE’.",
+            "process_code": str(opportunity.get("process_code") or "").strip(),
+            "entity_name": str(opportunity.get("entity_name") or "").strip(),
+            "source_url": str(opportunity.get("official_source_url") or "https://prodapp2.seace.gob.pe/seacebus-uiwd-pub/buscadorPublico/buscadorPublico.xhtml"),
+            "image_url": "",
+            "evidence_path": "",
+            "captured_at": datetime.now().isoformat(timespec="seconds"),
+            "steps_completed": [],
+        }
+
+    import asyncio
+
     try:
-        from playwright.sync_api import sync_playwright
+        from agente_seace import capturar_obra_standalone
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError("Playwright no está disponible para capturar la ficha SEACE") from exc
 
-    output_dir.mkdir(parents=True, exist_ok=True)
     process_code = str(opportunity.get("process_code") or "").strip()
+    description = str(opportunity.get("description") or "").strip()
     entity_name = str(opportunity.get("entity_name") or "").strip()
     source_url = str(opportunity.get("official_source_url") or "https://prodapp2.seace.gob.pe/seacebus-uiwd-pub/buscadorPublico/buscadorPublico.xhtml")
     if not process_code:
         raise RuntimeError("La oportunidad no tiene nomenclatura para buscar en SEACE")
 
+    output_dir.mkdir(parents=True, exist_ok=True)
     captured_at = datetime.now().isoformat(timespec="seconds")
-    safe_code = _safe_filename(process_code)
-    filename = f"ficha-{safe_code}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.png"
-    target = output_dir / filename
-    steps_completed: list[str] = []
-    status = "captured_search_page"
-    message = "SEACE fue abierto y se capturó la búsqueda; revisa si la ficha final cargó correctamente."
 
+    # Las libs del navegador están fuera del path estándar en la PC del usuario (WSL).
     old_platform = os.environ.get("PLAYWRIGHT_HOST_PLATFORM_OVERRIDE")
     old_ld_library_path = os.environ.get("LD_LIBRARY_PATH")
     os.environ.setdefault("PLAYWRIGHT_HOST_PLATFORM_OVERRIDE", "ubuntu24.04-x64")
@@ -327,68 +352,13 @@ def _default_ficha_capture_service(opportunity: dict[str, Any], output_dir: Path
     if Path(playwright_libs).exists() and playwright_libs not in (old_ld_library_path or ""):
         os.environ["LD_LIBRARY_PATH"] = f"{playwright_libs}:{old_ld_library_path}" if old_ld_library_path else playwright_libs
     try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            page = browser.new_page(viewport={"width": 1440, "height": 1200})
-            page.goto(source_url, wait_until="domcontentloaded", timeout=60000)
-            steps_completed.append("open_search")
-            page.wait_for_timeout(3000)
-
-            # Confirmed SEACE flow: activate the public procedures tab, search by
-            # selection number + bridge keyword/year, then open the ficha icon in
-            # the exact row whose nomenclature matches the opportunity.
-            selection_number = process_code.split("-")[2] if len(process_code.split("-")) > 2 else ""
-            try:
-                page.locator('a[href$="tbBuscador:tab1"]').click(force=True, timeout=8000)
-                steps_completed.append("open_procedures_tab")
-                page.wait_for_timeout(2500)
-            except Exception:
-                pass
-
-            if selection_number:
-                try:
-                    page.locator('input[id="tbBuscador:idFormBuscarProceso:numeroSeleccion"]').fill(selection_number, timeout=5000)
-                    steps_completed.append("fill_selection_number")
-                except Exception:
-                    pass
-            try:
-                search_text = "PUENTE" if "PUENTE" in str(opportunity.get("description", "")).upper() else process_code
-                page.locator('input[id="tbBuscador:idFormBuscarProceso:descripcionObjeto"]').fill(search_text, timeout=5000)
-                steps_completed.append("fill_description")
-            except Exception:
-                pass
-
-            try:
-                page.locator('button[id="tbBuscador:idFormBuscarProceso:btnBuscarSelToken"]').click(timeout=10000)
-                steps_completed.append("search_process")
-                page.wait_for_timeout(9000)
-            except Exception:
-                # fallback: capture current official portal if search button changes
-                pass
-
-            ficha_clicked = False
-            try:
-                rows = page.locator('tbody[id$="dtProcesos_data"] tr')
-                for index in range(rows.count()):
-                    row = rows.nth(index)
-                    if process_code in row.inner_text(timeout=3000):
-                        steps_completed.append("match_process_row")
-                        ficha_link = row.locator('a:has(img[src*="fichaSeleccion"])').first
-                        if ficha_link.is_visible(timeout=5000):
-                            ficha_link.click(force=True, timeout=10000)
-                            ficha_clicked = True
-                            steps_completed.append("open_ficha")
-                            page.wait_for_timeout(9000)
-                        break
-            except Exception:
-                pass
-
-            if ficha_clicked:
-                status = "captured"
-                message = "Ficha de Selección encontrada y capturada automáticamente."
-            page.screenshot(path=str(target), full_page=True)
-            steps_completed.append("capture")
-            browser.close()
+        png_path = asyncio.run(capturar_obra_standalone(
+            nomenclatura=process_code,
+            descripcion=description,
+            entity_name=entity_name,
+            output_dir=str(output_dir),
+            headless=True,
+        ))
     finally:
         if old_platform is None:
             os.environ.pop("PLAYWRIGHT_HOST_PLATFORM_OVERRIDE", None)
@@ -399,16 +369,30 @@ def _default_ficha_capture_service(opportunity: dict[str, Any], output_dir: Path
         else:
             os.environ["LD_LIBRARY_PATH"] = old_ld_library_path
 
+    if not png_path:
+        return {
+            "status": "not_found",
+            "message": "No se encontró la Ficha de Selección exacta en SEACE. Usa el botón ‘Abrir en SEACE’ como respaldo.",
+            "process_code": process_code,
+            "entity_name": entity_name,
+            "source_url": source_url,
+            "image_url": "",
+            "evidence_path": "",
+            "captured_at": captured_at,
+            "steps_completed": ["open_search", "search_process"],
+        }
+
+    filename = Path(png_path).name
     return {
-        "status": status,
-        "message": message,
+        "status": "captured",
+        "message": "Ficha de Selección encontrada y capturada automáticamente.",
         "process_code": process_code,
         "entity_name": entity_name,
         "source_url": source_url,
         "image_url": f"/assets/evidencias/{filename}",
-        "evidence_path": str(target),
+        "evidence_path": str(png_path),
         "captured_at": captured_at,
-        "steps_completed": steps_completed,
+        "steps_completed": ["open_search", "fill_filters", "match_process_row", "open_ficha", "capture"],
     }
 
 

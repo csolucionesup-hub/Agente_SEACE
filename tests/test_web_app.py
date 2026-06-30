@@ -462,6 +462,22 @@ def test_api_untrack_requires_ocids(tmp_path):
     assert client.post("/api/untrack", json={"ocids": []}).status_code == 400
 
 
+def test_ficha_capture_skips_old_seace_v2_obras_without_browser(tmp_path):
+    # Las obras v2 (procesos antiguos) no están en el buscador v3 → corta sin abrir el
+    # navegador y devuelve un estado claro en vez de intentar (y fallar) la captura.
+    from web_app import _default_ficha_capture_service
+    opp = {
+        "ocid": "ocds-dgv273-seacev2-247622",
+        "process_code": "LPN-3-2005-MTC/20",
+        "entity_name": "MTC - PROVIAS NACIONAL",
+        "description": "Construccion de puentes",
+    }
+    result = _default_ficha_capture_service(opp, tmp_path)
+    assert result["status"] == "old_version"
+    assert result["image_url"] == ""
+    assert "SEACE v2" in result["message"]
+
+
 def test_api_dismiss_persists_ignored_ocid(tmp_path):
     settings_path = tmp_path / "settings.json"
     client = TestClient(create_app(dashboard_path=tmp_path / "dashboard.json", settings_path=settings_path))
