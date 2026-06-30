@@ -30,7 +30,7 @@ from seace_relevance import score_relevance
 from seace_api import Opportunity, SeaceApiClient
 from seace_oportunidades import collect_opportunities
 from seace_seguimiento import sync_ocids
-from seace_tracking import TrackingStore
+from seace_tracking import TrackingStore, export_dashboard_json
 from seace_documents import analyze_document, build_technical_file_response, download_verified_document, extract_official_documents, verify_document_link
 from seace_conosce import fetch_market_intel
 from auth_supabase import SupabaseAuth, bearer_token
@@ -879,8 +879,24 @@ def create_app(
                 _write_disk_search_cache(disk_search_cache_path, cache_key, opportunities, search_truncated)
             from_cache = False
         ignored_ocids = set(settings.get("ignored_ocids") or [])
-        visible_opportunities = [opportunity for opportunity in opportunities if opportunity.ocid not in ignored_ocids]
-        ignored_count = len(opportunities) - len(visible_opportunities)
+        # Las obras ya agregadas a seguimiento NO deben reaparecer en la búsqueda
+        # (es redundante: ya están en la bandeja). Se ocultan igual que las
+        # descartadas; vuelven a aparecer solo si el usuario las quita del
+        # seguimiento (/api/untrack).
+        store = TrackingStore(tracking_db_path)
+        store.initialize()
+        try:
+            tracked_ocids = set(store.list_all_ocids())
+        finally:
+            store.close()
+        ignored_count = sum(1 for opportunity in opportunities if opportunity.ocid in ignored_ocids)
+        tracked_count = sum(
+            1
+            for opportunity in opportunities
+            if opportunity.ocid in tracked_ocids and opportunity.ocid not in ignored_ocids
+        )
+        hidden_ocids = ignored_ocids | tracked_ocids
+        visible_opportunities = [opportunity for opportunity in opportunities if opportunity.ocid not in hidden_ocids]
         filtered_by_seace, filtered_out_count = _filter_opportunities(
             visible_opportunities,
             contract_object=contract_object,
@@ -946,6 +962,7 @@ def create_app(
             "from_cache": from_cache,
             "search_truncated": search_truncated,
             "ignored_count": ignored_count,
+            "tracked_count": tracked_count,
             "filtered_out_count": filtered_out_count,
             "search_advice": search_advice,
             "recommended_relaxation": recommended_relaxation,
@@ -971,6 +988,23 @@ def create_app(
         store.initialize()
         events = sync_ocids(api_client, store, ocids, dashboard_path=dashboard_path)
         return {"tracked": ocids, "events": len(events), "dashboard": str(dashboard_path)}
+
+    @app.post("/api/untrack")
+    async def untrack_opportunities(request: Request) -> dict[str, Any]:
+        """Quita obras del seguimiento. Tras esto vuelven a aparecer en la búsqueda."""
+        payload = await request.json()
+        ocids = [str(item).strip() for item in payload.get("ocids", []) if str(item).strip()]
+        if not ocids:
+            raise HTTPException(status_code=400, detail="ocids is required")
+        store = TrackingStore(tracking_db_path)
+        store.initialize()
+        try:
+            removed = [ocid for ocid in ocids if store.delete_snapshot(ocid)]
+            # Regenerar el dashboard para que la bandeja refleje el cambio.
+            export_dashboard_json(store, dashboard_path)
+        finally:
+            store.close()
+        return {"untracked": removed, "dashboard": str(dashboard_path)}
 
     @app.get("/api/opportunities/{ocid}")
     def opportunity_detail(ocid: str) -> dict[str, Any]:

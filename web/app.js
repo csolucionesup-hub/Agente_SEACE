@@ -296,7 +296,7 @@ function renderTable(opportunities) {
       <td>${formatMoney(item.amount)}</td>
       <td>${badge(u.level)} ${escapeHtml(u.label)}</td>
       <td>${item.winner_name ? `${escapeHtml(item.winner_name)}<br><small>RUC ${escapeHtml(item.winner_ruc)} · ${formatMoney(item.awarded_amount)}</small>` : '—'}</td>
-      <td>${escapeHtml(recommendedAction(item))}</td>
+      <td>${escapeHtml(recommendedAction(item))}<br><button type="button" class="link-button danger-link" data-untrack-ocid="${escapeHtml(item.ocid)}" title="Quita esta obra de la bandeja; volverá a aparecer en la búsqueda.">Quitar de seguimiento</button></td>
     </tr>`;
   }).join('');
 }
@@ -709,12 +709,14 @@ async function runNewSearch(event) {
   const shown = data.count || 0;
   const total = data.total_found ?? shown;
   const ignored = data.ignored_count || 0;
+  const tracked = data.tracked_count || 0;
   const filteredOut = data.filtered_out_count || 0;
   const ignoredText = ignored ? ` (${ignored} descartado(s) ocultos)` : '';
+  const trackedText = tracked ? ` (${tracked} ya en seguimiento, ocultos)` : '';
   const filteredText = filteredOut ? ` Filtros SEACE ocultaron ${filteredOut} resultado(s) no pertinentes.` : '';
   status.textContent = total > shown
-    ? `Encontré ${total} resultado(s). Te muestro los mejores ${shown} para revisar primero.${ignoredText}${filteredText}`
-    : `${shown} resultado(s) encontrados para ${data.keywords.join(', ')}.${ignoredText}${filteredText}`;
+    ? `Encontré ${total} resultado(s). Te muestro los mejores ${shown} para revisar primero.${ignoredText}${trackedText}${filteredText}`
+    : `${shown} resultado(s) encontrados para ${data.keywords.join(', ')}.${ignoredText}${trackedText}${filteredText}`;
   state.searchResults = (data.results || []).sort((a, b) => ((b.commercial_score || 0) - (a.commercial_score || 0)) || ((b.amount || 0) - (a.amount || 0)));
   state.searchPage = 1;
   state.searchPageSize = Number(byId('search-page-size').value || 25);
@@ -747,6 +749,32 @@ async function trackOcid(ocid, button) {
   renderTable(state.filtered);
   button.textContent = 'Agregado ✓';
   byId('search-status').textContent = 'Expediente agregado al seguimiento y dashboard actualizado.';
+}
+
+async function untrackOcid(ocid, button) {
+  if (!ocid) return;
+  if (!confirm('¿Quitar esta obra del seguimiento? Volverá a aparecer en la búsqueda.')) return;
+  button.disabled = true;
+  button.textContent = 'Quitando…';
+  const response = await fetch('/api/untrack', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ocids: [ocid] }),
+  });
+  if (!response.ok) {
+    button.disabled = false;
+    button.textContent = 'Quitar de seguimiento';
+    return;
+  }
+  state.dashboard = await (await fetch('/api/dashboard')).json();
+  state.filtered = state.dashboard.opportunities;
+  renderMetricCards(state.dashboard.opportunities);
+  renderPriorityList(state.dashboard.opportunities);
+  renderAlerts(state.dashboard.recent_events);
+  renderBars('stage-bars', state.dashboard.counts_by_stage);
+  renderBars('outcome-bars', state.dashboard.counts_by_outcome);
+  setupFilters(state.dashboard);
+  renderTable(state.filtered);
 }
 
 async function dismissOcid(ocid, button) {
@@ -895,6 +923,7 @@ function bindEvents() {
     const navTarget = event.target.closest('[data-view]');
     const ocidTarget = event.target.closest('[data-open-ocid]');
     const trackTarget = event.target.closest('[data-track-ocid]');
+    const untrackTarget = event.target.closest('[data-untrack-ocid]');
     const dismissTarget = event.target.closest('[data-dismiss-ocid]');
     const restoreTarget = event.target.closest('[data-restore-ocid]');
     const docActionTarget = event.target.closest('[data-doc-action]');
@@ -906,6 +935,7 @@ function bindEvents() {
     if (navTarget) setView(navTarget.dataset.view);
     if (ocidTarget) openDetail(ocidTarget.dataset.openOcid);
     if (trackTarget) trackOcid(trackTarget.dataset.trackOcid, trackTarget);
+    if (untrackTarget) untrackOcid(untrackTarget.dataset.untrackOcid, untrackTarget);
     if (dismissTarget) dismissOcid(dismissTarget.dataset.dismissOcid, dismissTarget);
     if (restoreTarget) restoreDismissedOcid(restoreTarget.dataset.restoreOcid, restoreTarget);
     if (docActionTarget) loadOfficialDocuments(docActionTarget.dataset.docOcid, docActionTarget.dataset.docAction === 'analyze');

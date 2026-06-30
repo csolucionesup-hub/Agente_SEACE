@@ -451,6 +451,30 @@ class TrackingStore:
         rows = self.connection.execute("select * from opportunities order by ocid").fetchall()
         return [OpportunitySnapshot.from_row(row) for row in rows]
 
+    def list_all_ocids(self) -> list[str]:
+        """Todos los OCID en seguimiento, sin importar etapa/outcome.
+
+        A diferencia de ``list_active_ocids`` (que excluye los terminales para el
+        worker), esto devuelve TODO lo que el usuario agregó a la bandeja. La
+        búsqueda lo usa para no volver a mostrar obras ya seguidas.
+        """
+        rows = self.connection.execute(
+            "select ocid from opportunities order by ocid"
+        ).fetchall()
+        return [row["ocid"] for row in rows]
+
+    def delete_snapshot(self, ocid: str) -> bool:
+        """Quita una obra del seguimiento (y sus eventos). Devuelve True si existía."""
+        clean_ocid = str(ocid)
+        self.connection.execute(
+            "delete from opportunity_events where ocid = ?", (clean_ocid,)
+        )
+        cursor = self.connection.execute(
+            "delete from opportunities where ocid = ?", (clean_ocid,)
+        )
+        self.connection.commit()
+        return cursor.rowcount > 0
+
     # --- Suscriptores (alertas por cliente) -------------------------------
 
     def upsert_subscriber(self, subscriber: Subscriber) -> Subscriber:

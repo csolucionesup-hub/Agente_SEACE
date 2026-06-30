@@ -80,3 +80,37 @@ def test_list_active_ocids_excludes_terminal_outcomes(tmp_path):
     store.upsert_snapshot(sample_snapshot("cancelled-1", status="cancelled"))
 
     assert store.list_active_ocids() == ["active-1"]
+
+
+def test_list_all_ocids_includes_terminal_states(tmp_path):
+    store = TrackingStore(tmp_path / "tracking.sqlite3")
+    store.initialize()
+    store.upsert_snapshot(sample_snapshot("active-1", status="active"))
+    store.upsert_snapshot(sample_snapshot("contracted-1", status="complete"))
+    store.upsert_snapshot(sample_snapshot("cancelled-1", status="cancelled"))
+
+    # A diferencia de list_active_ocids, trae TODO lo seguido (la búsqueda lo usa
+    # para no volver a mostrar nada que ya esté en la bandeja).
+    assert store.list_all_ocids() == ["active-1", "cancelled-1", "contracted-1"]
+
+
+def test_delete_snapshot_removes_opportunity_and_events(tmp_path):
+    store = TrackingStore(tmp_path / "tracking.sqlite3")
+    store.initialize()
+    store.upsert_snapshot(sample_snapshot("ocds-del-1"))
+    store.add_event(TrackingEvent(
+        ocid="ocds-del-1",
+        event_type="nueva_oportunidad",
+        title="Nueva",
+        message="x",
+        severity="medium",
+        occurred_at="2026-06-10T10:00:00-05:00",
+        payload={},
+    ))
+
+    assert store.delete_snapshot("ocds-del-1") is True
+    assert store.get_snapshot("ocds-del-1") is None
+    assert store.list_events("ocds-del-1") == []
+    assert store.list_all_ocids() == []
+    # Quitar algo inexistente devuelve False (no rompe).
+    assert store.delete_snapshot("ocds-del-1") is False

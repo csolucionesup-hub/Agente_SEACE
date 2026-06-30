@@ -416,6 +416,52 @@ def test_api_search_hides_dismissed_ocids(tmp_path):
     assert response.json()["ignored_count"] == 1
 
 
+def test_api_search_hides_tracked_ocids(tmp_path):
+    dashboard_path = tmp_path / "dashboard.json"
+    db_path = tmp_path / "tracking.sqlite3"
+    fake = FakeSearchClient()
+    client = TestClient(create_app(dashboard_path=dashboard_path, tracking_db_path=db_path, seace_client=fake))
+
+    # Sin seguimiento: la búsqueda trae las dos obras.
+    before = client.get("/api/search", params={"keywords": "PUENTE", "min_amount": 0})
+    assert {row["ocid"] for row in before.json()["results"]} == {"ocds-test-search-1", "ocds-test-low"}
+    assert before.json()["tracked_count"] == 0
+
+    # Agrego una a seguimiento.
+    assert client.post("/api/track", json={"ocids": ["ocds-test-search-1"]}).status_code == 200
+
+    # Ahora la búsqueda ya no la trae (sería redundante con la bandeja).
+    after = client.get("/api/search", params={"keywords": "PUENTE", "min_amount": 0})
+    data = after.json()
+    assert {row["ocid"] for row in data["results"]} == {"ocds-test-low"}
+    assert data["tracked_count"] == 1
+
+
+def test_api_untrack_removes_from_tracking_and_brings_it_back_to_search(tmp_path):
+    dashboard_path = tmp_path / "dashboard.json"
+    db_path = tmp_path / "tracking.sqlite3"
+    fake = FakeSearchClient()
+    client = TestClient(create_app(dashboard_path=dashboard_path, tracking_db_path=db_path, seace_client=fake))
+
+    client.post("/api/track", json={"ocids": ["ocds-test-search-1"]})
+    assert client.get("/api/dashboard").json()["opportunities"]
+
+    response = client.post("/api/untrack", json={"ocids": ["ocds-test-search-1"]})
+    assert response.status_code == 200
+    assert response.json()["untracked"] == ["ocds-test-search-1"]
+
+    # La bandeja queda vacía...
+    assert client.get("/api/dashboard").json()["opportunities"] == []
+    # ...y la búsqueda vuelve a traer la obra.
+    search = client.get("/api/search", params={"keywords": "PUENTE", "min_amount": 0})
+    assert "ocds-test-search-1" in {row["ocid"] for row in search.json()["results"]}
+
+
+def test_api_untrack_requires_ocids(tmp_path):
+    client = TestClient(create_app(dashboard_path=tmp_path / "dashboard.json", tracking_db_path=tmp_path / "t.sqlite3"))
+    assert client.post("/api/untrack", json={"ocids": []}).status_code == 400
+
+
 def test_api_dismiss_persists_ignored_ocid(tmp_path):
     settings_path = tmp_path / "settings.json"
     client = TestClient(create_app(dashboard_path=tmp_path / "dashboard.json", settings_path=settings_path))
