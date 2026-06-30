@@ -170,6 +170,34 @@ def extract_official_documents(record_payload: dict[str, Any]) -> list[dict[str,
     return cleaned
 
 
+# Documentos que le importan al usuario en el panel de "Documentos oficiales". El resto
+# (Calificación y Evaluación, Resumen ejecutivo, archivos de contrato, etc.) es ruido y se
+# oculta. Se filtra por TÍTULO —no por documentType— porque "Resumen ejecutivo" comparte
+# el tipo ``biddingDocuments`` con las Bases, así que el tipo no los distingue. Lista blanca
+# extensible: agregar acá un término nuevo (en minúsculas, sin acentos opcional) lo habilita.
+RELEVANT_DOCUMENT_TITLE_TERMS: tuple[str, ...] = (
+    "bases administrativas",
+    "bases integradas",
+    "presentación de propuestas",
+    "presentacion de propuestas",
+    "otorgamiento de buena pro",
+)
+
+
+def _is_relevant_document(document: dict[str, Any]) -> bool:
+    title = str(document.get("title") or "").lower()
+    return any(term in title for term in RELEVANT_DOCUMENT_TITLE_TERMS)
+
+
+def filter_relevant_documents(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Deja solo los documentos oficiales relevantes (lista blanca por título).
+
+    Quita el ruido (calificación/evaluación, resumen ejecutivo, archivos de contrato) del
+    panel de Documentos. NO se usa en el Expediente Técnico, que tiene su propia lógica.
+    """
+    return [document for document in documents if _is_relevant_document(document)]
+
+
 def _document_eto_component(document: dict[str, Any]) -> str:
     text = " ".join(
         str(document.get(key) or "")

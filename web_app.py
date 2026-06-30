@@ -31,7 +31,7 @@ from seace_api import Opportunity, SeaceApiClient
 from seace_oportunidades import collect_opportunities
 from seace_seguimiento import sync_ocids
 from seace_tracking import TrackingStore, export_dashboard_json
-from seace_documents import analyze_document, build_technical_file_response, download_verified_document, extract_official_documents, verify_document_link
+from seace_documents import analyze_document, build_technical_file_response, download_verified_document, extract_official_documents, filter_relevant_documents, verify_document_link
 from seace_conosce import fetch_market_intel
 from auth_supabase import SupabaseAuth, bearer_token
 
@@ -403,10 +403,11 @@ def _documents_from_record_or_dashboard(api_client: Any, opportunity: dict[str, 
             record = api_client.get_record(ocid)
             documents = extract_official_documents(record)
             if documents:
-                return documents
+                # Solo los documentos relevantes; el resto es ruido (ver filter_relevant_documents).
+                return filter_relevant_documents(documents)
         except Exception:
             pass
-    return [deepcopy(document) for document in opportunity.get("official_documents") or []]
+    return filter_relevant_documents([deepcopy(document) for document in opportunity.get("official_documents") or []])
 
 
 def _document_with_status(document: dict[str, Any], *, verify: bool, analyze: bool) -> dict[str, Any]:
