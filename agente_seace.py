@@ -40,18 +40,44 @@ def _derive_year_from_nomenclatura(nomenclatura: str, fallback: int | None = Non
     return datetime.datetime.now().year
 
 
+# Comillas (rectas y tipográficas) y sus versiones corruptas por mojibake (¿ ¡). La
+# descripción OCDS suele venir como: EJECUCION DE OBRA "NOMBRE DEL PROYECTO ..." y a veces
+# la comilla llega como ¿/¡, lo que rompe el match en SEACE.
+_SEPARADORES_TERMINO = re.compile("[¿¡\"“”'‘’`]+")
+
+
 def _termino_busqueda_obra(descripcion: str, nomenclatura: str) -> str:
     """Término distintivo para el campo 'Descripción del Objeto'.
 
     El buscador SEACE NO matchea la nomenclatura en ese campo (verificado en vivo: pegar
-    la nomenclatura devuelve 0 resultados), pero sí matchea la descripción real. Usamos un
-    tramo suficientemente distintivo de la descripción; la fila exacta se confirma luego con
-    el guard por nomenclatura. Si no hay descripción, cae a la nomenclatura como último recurso.
+    la nomenclatura devuelve 0 resultados), pero sí matchea la descripción real. Usamos el
+    tramo más distintivo: el NOMBRE DEL PROYECTO que va entre comillas (SEACE lo guarda tal
+    cual). Partimos por las comillas —incluida la corrupta ``¿``— y tomamos el segmento más
+    largo; así evitamos que un mojibake al inicio rompa la búsqueda. La fila exacta se
+    confirma luego con el guard por nomenclatura. Si no hay descripción, cae a la nomenclatura.
     """
     desc = (descripcion or "").strip()
     if len(desc) >= 12:
-        return desc[:90]
+        segmentos = [segmento.strip() for segmento in _SEPARADORES_TERMINO.split(desc) if segmento.strip()]
+        mejor = max(segmentos, key=len) if segmentos else desc
+        if len(mejor) < 12:  # ningún segmento distintivo → usa la descripción completa
+            mejor = desc
+        return mejor[:90]
     return (nomenclatura or "").strip()
+
+
+def _base_nomenclatura(nomen: str) -> str:
+    """Nomenclatura sin el número de convocatoria final (1-2 dígitos).
+
+    SEACE a veces lista la obra con otra convocatoria (p. ej. la data trae ...-MPC-2 pero
+    SEACE muestra ...-MPC-1). Se quita el sufijo solo si el año (20XX) sigue presente, para
+    no comerse el año en nomenclaturas cortas. Si no aplica, devuelve la nomenclatura igual.
+    """
+    nomen = (nomen or "").strip()
+    m = re.search(r"-\d{1,2}$", nomen)
+    if m and re.search(r"20\d{2}", nomen[: m.start()]):
+        return nomen[: m.start()]
+    return nomen
 
 async def esperar_procesamiento(page: Page):
     """Espera a que los indicadores de carga de PrimeFaces desaparezcan."""
@@ -258,7 +284,9 @@ async def buscar_y_capturar_obra(
 
     anio = _derive_year_from_nomenclatura(nomen, fallback=year)
     termino = _termino_busqueda_obra(descripcion, nomen)
-    logger.info("🎯 Captura dirigida: nomenclatura=%s año=%s término=%r", nomen, anio, termino[:40])
+    # Base sin el número de convocatoria final (ver _base_nomenclatura).
+    nomen_base = _base_nomenclatura(nomen)
+    logger.info("🎯 Captura dirigida: nomenclatura=%s (base=%s) año=%s término=%r", nomen, nomen_base, anio, termino[:40])
 
     # 1. Navegar al buscador y abrir su pestaña
     await page.goto(seace_url, wait_until="domcontentloaded", timeout=45000)
@@ -323,16 +351,24 @@ async def buscar_y_capturar_obra(
             break
 
         count = await page.locator(row_selector).count()
-        for i in range(count):
-            fila = page.locator(row_selector).nth(i)
-            try:
-                texto_fila = await fila.inner_text()
-            except Exception:
-                continue
-            if nomen not in texto_fila:
-                continue
+        # Primero la nomenclatura EXACTA; si no está, la base (misma obra, otra convocatoria).
+        objetivos = [nomen] if nomen_base == nomen else [nomen, nomen_base]
+        fila_idx = None
+        for objetivo in objetivos:
+            for i in range(count):
+                try:
+                    texto_fila = await page.locator(row_selector).nth(i).inner_text()
+                except Exception:
+                    continue
+                if objetivo in texto_fila:
+                    fila_idx = i
+                    logger.info("✅ Fila encontrada (pág %s, fila %s) por '%s' para %s", pagina, i, objetivo, nomen)
+                    break
+            if fila_idx is not None:
+                break
 
-            logger.info("✅ Fila exacta encontrada (pág %s, fila %s) para %s", pagina, i, nomen)
+        if fila_idx is not None:
+            fila = page.locator(row_selector).nth(fila_idx)
             btn_ficha = fila.locator('td').last.locator('a, button').filter(
                 has=page.locator('img[src*="ficha"], img[src*="cronograma"], .ui-icon-calendar, [title*="Ficha"], [title*="Cronograma"]')
             ).first
@@ -345,7 +381,7 @@ async def buscar_y_capturar_obra(
             await btn_ficha.scroll_into_view_if_needed()
             await btn_ficha.click(timeout=10000)
             await page.wait_for_selector('text="Regresar"', state="visible", timeout=30000)
-            # Reutiliza el core probado (espera cronograma, screenshot full-page, doble-regreso).
+            # Reutiliza el core probado (espera cronograma, screenshot recortado, doble-regreso).
             # Sanea '/' de la nomenclatura para el nombre de archivo.
             return await capturar_ficha_seace(
                 page, nomen.replace("/", "-"), institucion, anio, drive_handler, folder_id, output_dir
