@@ -35,6 +35,7 @@ from seace_tracking import TrackingStore, export_dashboard_json
 from seace_documents import analyze_document, build_technical_file_response, download_verified_document, extract_official_documents, filter_relevant_documents, verify_document_link
 from seace_conosce import fetch_market_intel
 from auth_supabase import SupabaseAuth, bearer_token
+import pdf_export
 
 DEFAULT_DASHBOARD_PATH = Path("reportes/dashboard-seguimiento.json")
 DEFAULT_STATIC_DIR = Path("web")
@@ -468,6 +469,14 @@ def _default_eto_download_service(opportunity: dict[str, Any], doc_id: str, outp
     return path
 
 
+def _default_pdf_export_service(opportunity: dict[str, Any], events: list[dict[str, Any]],
+                                timeline: list[dict[str, Any]], static_dir: Path) -> bytes:
+    """Genera el PDF con formato del expediente (logo + colores) renderizando HTML con
+    Playwright. Local-only (necesita navegador); en datacenter falla → el endpoint da 502."""
+    with _playwright_libs_env():
+        return pdf_export.render_expediente_pdf(opportunity, events, timeline, static_dir=static_dir)
+
+
 def _documents_from_record_or_dashboard(api_client: Any, opportunity: dict[str, Any]) -> list[dict[str, Any]]:
     ocid = str(opportunity.get("ocid") or "").strip()
     if api_client and ocid:
@@ -779,6 +788,7 @@ def create_app(
     ficha_capture_service: Any | None = None,
     eto_scrape_service: Any | None = None,
     eto_download_service: Any | None = None,
+    pdf_export_service: Any | None = None,
     api_key: str | None = None,
     search_cache_ttl: float = DEFAULT_SEARCH_CACHE_TTL,
     search_deadline: float = DEFAULT_SEARCH_DEADLINE,
@@ -796,6 +806,7 @@ def create_app(
     capture_service = ficha_capture_service or _default_ficha_capture_service
     eto_scrape = eto_scrape_service or _default_eto_scrape_service
     eto_download = eto_download_service or _default_eto_download_service
+    pdf_export_svc = pdf_export_service or _default_pdf_export_service
     configured_api_key = (api_key if api_key is not None else os.getenv("LICITASCAN_API_KEY", "")) or ""
     supabase_auth = SupabaseAuth(supabase_url, supabase_anon_key, verify=supabase_verify)
     search_cache = _TTLCache(search_cache_ttl)
@@ -1195,6 +1206,26 @@ def create_app(
         return JSONResponse(
             content=_expediente_export(opportunity, related_events),
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.get("/api/opportunities/{ocid}/export.pdf")
+    def export_opportunity_pdf(ocid: str) -> Response:
+        """Genera un PDF con formato (logo + colores) del expediente. Disposition inline
+        para que el botón 'Ver' (ojito) lo abra en el navegador; el botón 'Exportar' fuerza
+        la descarga vía atributo download. Local-only (Playwright)."""
+        data = load_dashboard(dashboard_path)
+        opportunity = _find_opportunity(data, ocid)
+        related_events = [event for event in data["recent_events"] if event.get("ocid") == ocid]
+        timeline = _build_timeline(opportunity, related_events)
+        try:
+            pdf_bytes = pdf_export_svc(opportunity, related_events, timeline, static_dir)
+        except Exception as exc:  # noqa: BLE001 - fallo de render visible al usuario
+            raise HTTPException(status_code=502, detail=f"No se pudo generar el PDF del expediente: {exc}") from exc
+        filename = f"expediente-{_safe_filename(str(opportunity.get('process_code') or ocid))}.pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{filename}"'},
         )
 
     @app.get("/api/market-intel")

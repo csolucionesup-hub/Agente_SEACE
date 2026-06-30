@@ -362,7 +362,7 @@ async function openDetail(ocid) {
   const detail = await response.json();
   const item = detail.opportunity;
   const officialSourceUrl = item.official_source_url || 'https://prodapp2.seace.gob.pe/seacebus-uiwd-pub/buscadorPublico/buscadorPublico.xhtml';
-  const exportUrl = `/api/opportunities/${encodeURIComponent(item.ocid)}/export`;
+  const pdfUrl = `/api/opportunities/${encodeURIComponent(item.ocid)}/export.pdf`;
   byId('detail-content').innerHTML = `<section class="detail-hero">
     <div class="panel detail-title">
       <p class="eyebrow">Expediente SEACE/OECE</p>
@@ -372,7 +372,8 @@ async function openDetail(ocid) {
       <div class="action-row">
         <a class="primary-action action-link" href="${escapeHtml(officialSourceUrl)}" target="_blank" rel="noopener noreferrer">Ir a SEACE</a>
         <button class="ghost" data-ficha-ocid="${escapeHtml(item.ocid)}">Ver ficha SEACE</button>
-        <a class="ghost action-link" href="${escapeHtml(exportUrl)}" download>Exportar expediente</a>
+        <a class="ghost action-link" href="${escapeHtml(pdfUrl)}" download title="Descargar el expediente en PDF">Exportar expediente (PDF)</a>
+        <a class="ghost action-link" href="${escapeHtml(pdfUrl)}" target="_blank" rel="noopener noreferrer" title="Ver el PDF del expediente">👁 Ver</a>
         <button class="ghost">Marcar como revisado</button>
       </div>
     </div>

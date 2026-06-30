@@ -55,6 +55,8 @@ def test_frontend_static_contract_exists():
     assert "data-eto-download" in script
     assert "/api/opportunities/" in script
     assert "/export" in script
+    assert "export.pdf" in script
+    assert "Exportar expediente (PDF)" in script
     assert "/api/search" in script
     assert "/api/track" in script
     assert "renderSearchPage" in script

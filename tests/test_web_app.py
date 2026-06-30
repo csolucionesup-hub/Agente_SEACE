@@ -344,6 +344,38 @@ def test_api_eto_download_requires_doc_id(tmp_path):
     assert response.status_code == 400
 
 
+class FakePdfExportService:
+    def __call__(self, opportunity, events, timeline, static_dir):
+        return b"%PDF-1.4 fake-pdf"
+
+
+def test_api_export_pdf_returns_pdf(tmp_path):
+    dashboard_path = tmp_path / "dashboard.json"
+    write_dashboard(dashboard_path)
+    client = TestClient(create_app(dashboard_path=dashboard_path, pdf_export_service=FakePdfExportService()))
+
+    response = client.get("/api/opportunities/ocds-test-1/export.pdf")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert response.content == b"%PDF-1.4 fake-pdf"
+
+
+def test_api_export_pdf_reports_failure(tmp_path):
+    class Broken:
+        def __call__(self, opportunity, events, timeline, static_dir):
+            raise RuntimeError("no hay navegador para el PDF")
+
+    dashboard_path = tmp_path / "dashboard.json"
+    write_dashboard(dashboard_path)
+    client = TestClient(create_app(dashboard_path=dashboard_path, pdf_export_service=Broken()))
+
+    response = client.get("/api/opportunities/ocds-test-1/export.pdf")
+
+    assert response.status_code == 502
+    assert "no hay navegador para el PDF" in response.json()["detail"]
+
+
 def test_api_exports_opportunity_expediente_json(tmp_path):
     dashboard_path = tmp_path / "dashboard.json"
     write_dashboard(dashboard_path)
