@@ -532,7 +532,8 @@ async function loadEto(ocid, btn) {
 function renderEto(ocid, data) {
   const grupos = data.grupos || [];
   if (!grupos.length) {
-    return '<p>No se encontraron documentos del Expediente Técnico para esta obra.</p>';
+    return `<div class="document-help"><p><strong>Esta obra no tiene documentos en su Expediente Técnico.</strong></p>
+      <p class="muted-copy">No es un error: SEACE no publicó archivos en esa sección. Es común en obras de "saldo de obra" o re-licitaciones, donde el Expediente Técnico pertenecía al contrato original. En obras nuevas sí aparecen (Memoria, Especificaciones, Planos, Metrados, Presupuesto, etc.).</p></div>`;
   }
   const cuerpo = grupos.map(grupo => `
     <details class="eto-group">
