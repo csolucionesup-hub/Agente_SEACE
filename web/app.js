@@ -397,6 +397,10 @@ async function openDetail(ocid) {
         <div><span>Monto adjudicado</span><strong>${formatMoney(item.awarded_amount)}</strong></div>
         <div><span>Fecha buena pro</span><strong>${formatDate(item.award_date)}</strong></div>
       </div>` : '<p>Aún no hay ganador. Mantener seguimiento hasta buena pro.</p>'}
+      <div id="ficha-viewer-panel" class="ficha-inline" hidden>
+        <h3>Ficha de Selección SEACE</h3>
+        <div id="ficha-viewer-content"></div>
+      </div>
     </div>
     <div class="panel" id="official-documents-panel">
       <h2>Documentos oficiales</h2>
@@ -406,12 +410,6 @@ async function openDetail(ocid) {
         <p class="muted-copy">Documentos técnicos del ETO (Memoria, Especificaciones, Planos, Metrados, Presupuesto, Análisis de precios…). Tarda ~1 min: navega SEACE en vivo.</p>
         <div id="eto-content"></div>
       </div>
-    </div>
-  </section>
-  <section class="dashboard-grid two">
-    <div class="panel wide-panel" id="ficha-viewer-panel" hidden>
-      <h2>Ficha de Selección SEACE</h2>
-      <div id="ficha-viewer-content"></div>
     </div>
   </section>
   <section class="dashboard-grid two">

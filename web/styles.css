@@ -391,3 +391,7 @@ body.locked { overflow: hidden; }
 .eto-file:first-child { border-top: none; }
 .eto-file-meta { min-width: 0; word-break: break-word; }
 .eto-file-meta small { color: var(--muted); }
+
+/* Ficha de Seleccion embebida en el panel de Inteligencia competitiva */
+.ficha-inline { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 14px; }
+.ficha-inline h3 { margin: 0 0 8px; font-size: 15px; color: var(--text); }
