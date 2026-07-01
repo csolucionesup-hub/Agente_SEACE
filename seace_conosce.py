@@ -160,7 +160,8 @@ def summarize_rows(rows: list[dict[str, str]], keyword: str = "", min_amount: fl
                 "process_code": _field(row, "PROCESO", "CODIGOCONVOCATORIA", "NUMERO_EXPEDIENTE", "NOMENCLATURA"),
             }
             # Ordenadas de MAYOR a menor monto (los hallazgos de más alto ticket primero).
-            for row in sorted(filtered, key=_row_amount, reverse=True)[:20]
+            # Se traen hasta 200 para que el front las pagine y el usuario navegue.
+            for row in sorted(filtered, key=_row_amount, reverse=True)[:200]
         ],
     }
 

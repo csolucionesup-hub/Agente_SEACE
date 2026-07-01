@@ -957,6 +957,8 @@ function bindEvents() {
         renderSearchPage();
       }
     }
+    if (event.target.id === 'intelPrevPage') { state.intelPage = (state.intelPage || 1) - 1; renderIntelPage(); }
+    if (event.target.id === 'intelNextPage') { state.intelPage = (state.intelPage || 1) + 1; renderIntelPage(); }
     const deleteKeyword = event.target.closest('[data-delete-keyword]');
     const deleteChannel = event.target.closest('[data-delete-channel]');
     const deleteCustom = event.target.closest('[data-delete-custom]');
@@ -1008,11 +1010,12 @@ async function runMarketIntel(event) {
   const resultsEl = byId('market-intel-results');
   const keyword = byId('market-intel-keyword')?.value?.trim() || '';
   const year = byId('market-intel-year')?.value || '';
+  const minAmount = byId('market-intel-min-amount')?.value || '0';
   if (status) status.textContent = 'Consultando CONOSCE… puede tardar si el archivo no está en caché.';
   if (resultsEl) resultsEl.innerHTML = '';
 
   try {
-    const params = new URLSearchParams({ keyword, year });
+    const params = new URLSearchParams({ keyword, year, min_amount: minAmount });
     const response = await fetch(`/api/market-intel?${params}`);
     const data = await response.json();
 
@@ -1023,29 +1026,51 @@ async function runMarketIntel(event) {
     }
 
     if (resultsEl) {
+      state.intelRecords = data.sample_records || [];
+      state.intelPage = 1;
       resultsEl.innerHTML = `
         <div class="dashboard-grid">
           ${renderRankingPanel('Entidades que más contratan (por monto)', data.top_entities || [], 'amount')}
           ${renderRankingPanel('Categorías (por monto)', data.top_categories || [], 'amount')}
           ${renderRankingPanel('Ganadores recurrentes', data.top_winners || [], 'count', 'adj.')}
         </div>
-        ${data.sample_records?.length ? `<div class="panel">
+        ${state.intelRecords.length ? `<div class="panel">
           <h2>Obras de mayor monto (mayor ticket)</h2>
-          <div class="table-wrap"><table>
-            <thead><tr><th>Entidad</th><th>Descripción</th><th>Monto</th><th>Código</th></tr></thead>
-            <tbody>${data.sample_records.map(r => `<tr>
-              <td>${escapeHtml(r.entity || '')}</td>
-              <td>${escapeHtml(r.description || '')}</td>
-              <td>${formatMoney(r.amount)}</td>
-              <td>${escapeHtml(r.process_code || '')}</td>
-            </tr>`).join('')}</tbody>
-          </table></div>
+          <div id="intel-records"></div>
         </div>` : ''}
       `;
+      renderIntelPage();
     }
   } catch (error) {
     if (status) status.textContent = `Error: ${escapeHtml(error.message)}`;
   }
+}
+
+function renderIntelPage() {
+  const container = byId('intel-records');
+  if (!container) return;
+  const size = 10;
+  const records = state.intelRecords || [];
+  const totalPages = Math.max(1, Math.ceil(records.length / size));
+  const page = Math.min(Math.max(1, state.intelPage || 1), totalPages);
+  state.intelPage = page;
+  const slice = records.slice((page - 1) * size, page * size);
+  container.innerHTML = `
+    <div class="table-wrap"><table>
+      <thead><tr><th>Entidad</th><th>Descripción</th><th>Monto</th><th>Código</th></tr></thead>
+      <tbody>${slice.map(r => `<tr>
+        <td>${escapeHtml(r.entity || '')}</td>
+        <td>${escapeHtml(r.description || '')}</td>
+        <td>${formatMoney(r.amount)}</td>
+        <td>${escapeHtml(r.process_code || '')}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    ${totalPages > 1 ? `<div class="search-pagination">
+      <button class="ghost" type="button" id="intelPrevPage" ${page <= 1 ? 'disabled' : ''}>← Anterior</button>
+      <span>Página ${page} de ${totalPages} · ${records.length} obra(s)</span>
+      <button class="ghost" type="button" id="intelNextPage" ${page >= totalPages ? 'disabled' : ''}>Siguiente →</button>
+    </div>` : `<p class="muted-copy">${records.length} obra(s).</p>`}
+  `;
 }
 
 function renderRankingPanel(title, items, mode = 'count', unit = '') {
