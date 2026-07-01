@@ -119,7 +119,9 @@ button { cursor: pointer; }
 .badge.low { background:#f3f4f6; color:#4b5563; }
 
 .bars { display:grid; gap:10px; }
-.bar-row { display:grid; grid-template-columns: 150px 1fr 42px; gap:10px; align-items:center; }
+.bar-row { display:grid; grid-template-columns: minmax(0, 1.3fr) minmax(50px, 2fr) auto; gap:10px; align-items:center; }
+.bar-row > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; color:var(--text); }
+.bar-row > strong { white-space:nowrap; font-size:13px; text-align:right; }
 .bar-track { height:10px; background:#e5e7eb; border-radius:999px; overflow:hidden; }
 .bar-fill { height:100%; background:linear-gradient(90deg, var(--brand), var(--brand-2)); }
 
