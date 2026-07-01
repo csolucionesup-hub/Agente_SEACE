@@ -35,7 +35,7 @@ class CountingClient:
     def __init__(self):
         self.calls = 0
 
-    def search_opportunities(self, keyword: str, page: int = 1, paginate_by: int = 50):
+    def search_opportunities(self, keyword: str, page: int = 1, paginate_by: int = 50, year=None):
         self.calls += 1
         if page > 1:
             return []
@@ -51,7 +51,7 @@ class SlowEndlessClient:
     def __init__(self):
         self.calls = 0
 
-    def search_opportunities(self, keyword: str, page: int = 1, paginate_by: int = 50):
+    def search_opportunities(self, keyword: str, page: int = 1, paginate_by: int = 50, year=None):
         self.calls += 1
         time.sleep(0.05)
         return [_opp(f"ocds-{keyword}-{page}")]

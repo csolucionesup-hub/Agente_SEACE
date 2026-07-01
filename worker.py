@@ -19,6 +19,7 @@ import argparse
 import logging
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -74,19 +75,25 @@ def refresh_search_cache(
     deadline_seconds: float | None = None,
     *,
     extra_keywords: list[str] | None = None,
+    years: list[int] | None = None,
 ) -> list[Any]:
     """Corre la búsqueda profunda y la persiste en el cache de disco.
 
     ``extra_keywords`` (las de los suscriptores activos) se unen a las de settings
-    para que un solo crawl cubra el nicho de todos. Devuelve las oportunidades
-    encontradas (el worker las usa para sembrar el tracking).
+    para que un solo crawl cubra el nicho de todos. ``years`` filtra por año de
+    convocatoria (default: año actual + anterior, lo reciente) — mismo criterio que la
+    búsqueda web, para que el cache que calienta el worker sea el que el web lee. Devuelve
+    las oportunidades encontradas (el worker las usa para sembrar el tracking).
     """
     keywords = _merge_keywords(settings.get("keywords"), extra_keywords)
     if not keywords:
         return []
-    cache_key = (tuple(sorted(keywords)), max_pages, paginate_by)
+    if years is None:
+        current_year = datetime.now().year
+        years = [current_year, current_year - 1]
+    cache_key = (tuple(sorted(keywords)), tuple(years), max_pages, paginate_by)
     opportunities, truncated = _deep_search_opportunities(
-        client, keywords, max_pages=max_pages, paginate_by=paginate_by, deadline_seconds=deadline_seconds
+        client, keywords, years=years, max_pages=max_pages, paginate_by=paginate_by, deadline_seconds=deadline_seconds
     )
     _write_disk_search_cache(cache_path, cache_key, opportunities, truncated)
     return opportunities

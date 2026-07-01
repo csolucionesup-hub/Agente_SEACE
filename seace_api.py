@@ -150,11 +150,14 @@ class SeaceApiClient:
         self.base_url = base_url.rstrip("/")
         self.http = http or HttpxJsonHttpClient()
 
-    def search_opportunities(self, keyword: str, page: int = 1, paginate_by: int = 50) -> list[Opportunity]:
-        payload = self.http.get_json(
-            f"{self.base_url}/api/v1/search",
-            params={"search": keyword, "page": page, "paginateBy": paginate_by, "format": "json"},
-        )
+    def search_opportunities(self, keyword: str, page: int = 1, paginate_by: int = 50, year: int | None = None) -> list[Opportunity]:
+        # OCDS ordena por año ASCENDENTE (las más viejas primero) y hay miles por keyword;
+        # sin filtrar por año, las primeras páginas se llenan de obras de 2004-2010 y nunca
+        # se llega a las recientes. Filtrar por ``year`` es clave para traer lo nuevo.
+        params: dict[str, Any] = {"search": keyword, "page": page, "paginateBy": paginate_by, "format": "json"}
+        if year:
+            params["year"] = str(year)
+        payload = self.http.get_json(f"{self.base_url}/api/v1/search", params=params)
         return [normalize_search_result(result, keyword=keyword, base_url=self.base_url) for result in payload.get("results", [])]
 
     def list_monthly_files(

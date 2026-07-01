@@ -556,8 +556,9 @@ class _TTLCache:
 
 
 def _disk_cache_key(cache_key: tuple[Any, ...]) -> str:
-    keywords, max_pages, paginate_by = cache_key
-    return "||".join(keywords) + f"@@{int(max_pages)}@@{int(paginate_by)}"
+    keywords, years, max_pages, paginate_by = cache_key
+    years_part = "-".join(str(y) for y in years) or "all"
+    return "||".join(keywords) + f"@@{years_part}@@{int(max_pages)}@@{int(paginate_by)}"
 
 
 def _read_disk_search_cache(
@@ -605,31 +606,42 @@ def _write_disk_search_cache(
 def _deep_search_opportunities(
     client: Any,
     keywords: list[str],
+    years: list[int] | None = None,
     max_pages: int = 20,
     paginate_by: int = 50,
     deadline_seconds: float | None = None,
 ) -> tuple[list[Any], bool]:
     """Fetch opportunities across pages, stopping early if the wall-clock deadline is hit.
 
-    Returns ``(opportunities, truncated)`` where ``truncated`` is True when the deadline
-    cut the crawl short so callers can surface partial-result advice.
+    Se recorre por AÑO (recientes primero) porque OCDS ordena por año ascendente y tiene
+    miles de obras por keyword: sin filtrar por año, las primeras 1000 son todas de
+    2004-2010 y nunca se llega a las nuevas. Con ``years=[2026, 2025]`` traemos lo reciente.
+    ``years=None`` mantiene el comportamiento viejo (sin filtro de año). Returns
+    ``(opportunities, truncated)``.
     """
     by_ocid: dict[str, Any] = {}
     start = time.monotonic()
     truncated = False
-    for keyword in keywords:
+    year_list: list[int | None] = list(years) if years else [None]
+    for year in year_list:
         if truncated:
             break
-        for page in range(1, max_pages + 1):
-            if deadline_seconds is not None and (time.monotonic() - start) > deadline_seconds:
-                truncated = True
+        for keyword in keywords:
+            if truncated:
                 break
-            page_results = client.search_opportunities(keyword, page=page, paginate_by=paginate_by)
-            if not page_results:
-                break
-            for opportunity in page_results:
-                key = opportunity.ocid or f"{opportunity.process_code}|{opportunity.entity_id}|{opportunity.date}"
-                by_ocid.setdefault(key, opportunity)
+            for page in range(1, max_pages + 1):
+                if deadline_seconds is not None and (time.monotonic() - start) > deadline_seconds:
+                    truncated = True
+                    break
+                if year is None:
+                    page_results = client.search_opportunities(keyword, page=page, paginate_by=paginate_by)
+                else:
+                    page_results = client.search_opportunities(keyword, page=page, paginate_by=paginate_by, year=year)
+                if not page_results:
+                    break
+                for opportunity in page_results:
+                    key = opportunity.ocid or f"{opportunity.process_code}|{opportunity.entity_id}|{opportunity.date}"
+                    by_ocid.setdefault(key, opportunity)
     return list(by_ocid.values()), truncated
 
 
@@ -922,6 +934,7 @@ def create_app(
         publication_to: str = "",
         convocatoria_from: str = "",
         convocatoria_to: str = "",
+        year: str = "",
     ) -> dict[str, Any]:
         settings = load_settings(settings_path)
         clean_keywords = _parse_keywords(keywords) if keywords.strip() else list(settings["keywords"])
@@ -930,7 +943,14 @@ def create_app(
         effective_min_amount = settings["min_amount"] if min_amount is None else min_amount
         safe_max_pages = min(max(1, max_pages), 50)
         safe_paginate_by = min(max(1, paginate_by), 100)
-        cache_key = (tuple(sorted(clean_keywords)), safe_max_pages, safe_paginate_by)
+        # Año(s) de la convocatoria a buscar. OCDS ordena por año ascendente y hay miles por
+        # keyword, así que sin filtrar por año la app se llena de obras viejas (2004-2010) y
+        # nunca ve las nuevas. Por defecto, año actual + anterior (lo reciente, que es lo útil).
+        current_year = datetime.now().year
+        years = [int(p) for p in year.replace(",", " ").split() if p.isdigit() and len(p) == 4]
+        if not years:
+            years = [current_year, current_year - 1]
+        cache_key = (tuple(sorted(clean_keywords)), tuple(years), safe_max_pages, safe_paginate_by)
         cached = search_cache.get(cache_key)
         if cached is None and disk_search_cache_path is not None:
             cached = _read_disk_search_cache(disk_search_cache_path, cache_key, search_cache_ttl)
@@ -942,6 +962,7 @@ def create_app(
             opportunities, search_truncated = _deep_search_opportunities(
                 api_client,
                 clean_keywords,
+                years=years,
                 max_pages=safe_max_pages,
                 paginate_by=safe_paginate_by,
                 deadline_seconds=search_deadline,
@@ -1029,6 +1050,7 @@ def create_app(
             "total_found": total_found,
             "results": visible_rows,
             "keywords": clean_keywords,
+            "years": years,
             "min_amount": effective_min_amount,
             "searched_pages_limit": safe_max_pages,
             "from_cache": from_cache,

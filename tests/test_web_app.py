@@ -13,7 +13,7 @@ class FakeSearchClient:
         self.records_requested = []
         self.search_pages = []
 
-    def search_opportunities(self, keyword: str, page: int = 1, paginate_by: int = 50):
+    def search_opportunities(self, keyword: str, page: int = 1, paginate_by: int = 50, year=None):
         self.search_pages.append(page)
         if page > 1:
             return []
@@ -429,12 +429,13 @@ def test_api_search_filters_by_min_amount(tmp_path):
     assert data["results"][0]["amount"] == 1_500_000
     assert data["results"][0]["priority_label"] in {"Alta", "Media"}
     assert data["results"][0]["commercial_score"] > 0
-    assert fake.search_pages == [1, 2]
+    # La búsqueda pagina hasta la página vacía (2) por cada año buscado (por defecto 2 años).
+    assert set(fake.search_pages) == {1, 2}
 
 
 def test_api_search_supports_safe_deep_search_without_manual_page_picker(tmp_path):
     class MultiPageClient(FakeSearchClient):
-        def search_opportunities(self, keyword: str, page: int = 1, paginate_by: int = 50):
+        def search_opportunities(self, keyword: str, page: int = 1, paginate_by: int = 50, year=None):
             self.search_pages.append(page)
             if page > 3:
                 return []
@@ -619,7 +620,7 @@ def test_api_restore_dismissed_ocid_makes_it_visible_again(tmp_path):
 
 def test_api_search_supports_seace_style_filters_for_object_type_entity_method_and_dates(tmp_path):
     class FilterClient(FakeSearchClient):
-        def search_opportunities(self, keyword: str, page: int = 1, paginate_by: int = 50):
+        def search_opportunities(self, keyword: str, page: int = 1, paginate_by: int = 50, year=None):
             self.search_pages.append(page)
             if page > 1:
                 return []
@@ -655,7 +656,7 @@ def test_api_search_supports_seace_style_filters_for_object_type_entity_method_a
 
 def test_api_search_returns_zero_result_advice_for_restrictive_filters(tmp_path):
     class NoMatchClient(FakeSearchClient):
-        def search_opportunities(self, keyword: str, page: int = 1, paginate_by: int = 50):
+        def search_opportunities(self, keyword: str, page: int = 1, paginate_by: int = 50, year=None):
             return [
                 Opportunity(
                     keyword=keyword,

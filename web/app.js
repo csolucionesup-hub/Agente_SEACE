@@ -665,6 +665,7 @@ async function runNewSearch(event) {
   event.preventDefault();
   const status = byId('search-status');
   const keywords = byId('new-search-keywords').value.trim();
+  const year = byId('new-search-year') ? byId('new-search-year').value : '';
   const minAmount = byId('new-search-min-amount').value || '0';
   const contractObject = byId('new-search-contract-object').value;
   const entityName = byId('new-search-entity').value.trim();
@@ -679,6 +680,7 @@ async function runNewSearch(event) {
   byId('search-pagination').innerHTML = '';
   const params = new URLSearchParams({
     keywords,
+    year,
     min_amount: minAmount,
     max_pages: '20',
     paginate_by: '50',
