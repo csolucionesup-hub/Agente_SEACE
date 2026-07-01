@@ -40,6 +40,10 @@
           </div>
           <button class="primary-action" data-view-target="opportunities-view">Ver bandeja completa</button>
         </header>
+        <div class="tips-banner" role="status" aria-live="polite">
+          <span class="tips-icon" aria-hidden="true">💡</span>
+          <span class="tip-text" data-tips="dashboard">Tu resumen del día.</span>
+        </div>
 
         <h2>Prioridad de hoy</h2>
         <section class="priority-grid" id="priority-cards" aria-label="Prioridad de hoy"></section>
@@ -78,6 +82,10 @@
             <p>Flujo similar a SEACE para que el equipo busque obras de puente como lo haría en Firefox: primero Obra, luego descripción, ficha, Expediente Técnico de Obra y Sección 2.</p>
           </div>
         </header>
+        <div class="tips-banner" role="status" aria-live="polite">
+          <span class="tips-icon" aria-hidden="true">💡</span>
+          <span class="tip-text" data-tips="search">Busca obras en todo SEACE por palabra clave.</span>
+        </div>
         <section class="panel seace-flow-guide" aria-label="Guía de uso estilo SEACE">
           <div>
             <p class="eyebrow">Flujo similar a SEACE</p>
@@ -177,6 +185,10 @@
             <p>Lista tipo CRM para saber qué seguir, revisar o descartar.</p>
           </div>
         </header>
+        <div class="tips-banner" role="status" aria-live="polite">
+          <span class="tips-icon" aria-hidden="true">💡</span>
+          <span class="tip-text" data-tips="bandeja">Aquí viven las obras que agregaste a seguimiento.</span>
+        </div>
         <div class="filters">
           <input id="search-input" type="search" placeholder="Buscar por código, entidad o descripción…" />
           <select id="stage-filter" aria-label="Filtrar por etapa"></select>
@@ -217,6 +229,10 @@
             <p>Señales que justifican atención inmediata del equipo comercial.</p>
           </div>
         </header>
+        <div class="tips-banner" role="status" aria-live="polite">
+          <span class="tips-icon" aria-hidden="true">💡</span>
+          <span class="tip-text" data-tips="alerts">Avisos automáticos de las obras que sigues.</span>
+        </div>
         <div id="alerts-groups" class="alert-groups"></div>
       </section>
 
@@ -229,9 +245,9 @@
           </div>
           <a class="primary-action action-link" href="/api/export/xlsx" download>Exportar bandeja Excel</a>
         </header>
-        <div id="intel-tips-banner" class="tips-banner" role="status" aria-live="polite">
+        <div class="tips-banner" role="status" aria-live="polite">
           <span class="tips-icon" aria-hidden="true">💡</span>
-          <span id="intel-tip-text">Análisis de la competencia con datos históricos del Estado.</span>
+          <span class="tip-text" data-tips="intel">Análisis de la competencia con datos históricos del Estado.</span>
         </div>
         <form id="market-intel-form" class="panel search-panel">
           <label>Filtrar por palabra clave

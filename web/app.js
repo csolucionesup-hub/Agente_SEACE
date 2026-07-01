@@ -1061,30 +1061,58 @@ function renderRankingPanel(title, items, nameKey, countKey, unit = '') {
   </div>`;
 }
 
-const INTEL_TIPS = [
-  '🔍 ¿Qué es? Análisis de la competencia con datos históricos públicos del Estado (CONOSCE/OSCE).',
-  '🏢 Descubre QUÉ ENTIDADES compran más ese tipo de obra — a quiénes conviene apuntar.',
-  '🏆 Mira QUIÉNES GANAN los contratos — identifica a tus competidores reales en el rubro.',
-  '📂 Conoce las CATEGORÍAS de contratación más frecuentes del sector.',
-  '⚙️ Cómo usar: escribe una palabra clave (ej. "puente") + un año, y dale "Analizar mercado".',
-  '📊 Ejemplo: "puentes 2025" → qué municipalidades licitan más y qué consorcios les ganan.',
-];
-let _intelTipTimer = null;
+const SECTION_TIPS = {
+  dashboard: [
+    '📊 Tu resumen del día: oportunidades prioritarias, alertas y estado de tus obras.',
+    '🎯 Las "Oportunidades prioritarias" salen ordenadas por probabilidad comercial.',
+    '🔔 Revisa las alertas para ver qué cambió en las obras que sigues.',
+    '👉 Haz clic en una obra para abrir su expediente completo.',
+  ],
+  search: [
+    '🔎 Busca obras en todo SEACE por palabra clave (ej. "puente", "carretera").',
+    '📅 Por defecto trae obras recientes (2026 + 2025). Cambia el año si quieres.',
+    '💰 El "Monto mínimo" filtra obras chicas — bájalo si salen pocas.',
+    '➕ "Agregar a seguimiento" vigila una obra; deja de reaparecer en la búsqueda.',
+    '🚫 "Descartar" oculta una obra que no te interesa.',
+  ],
+  bandeja: [
+    '📁 Aquí viven las obras que agregaste a seguimiento.',
+    '👁 "Quitar de seguimiento" saca una obra (y vuelve a aparecer en la búsqueda).',
+    '🔔 Cuando una cambia de estado, te avisa en "Alertas comerciales".',
+    '📄 Clic en una obra → expediente, ficha SEACE, documentos y Expediente Técnico.',
+  ],
+  alerts: [
+    '🔔 Avisos automáticos de tus obras: nueva oportunidad, buena pro, contrato…',
+    '🔴 "Críticas" = atención inmediata. 🟡 "Importantes" = para revisar con calma.',
+    '🆕 Las "Nueva oportunidad" son obras que el sistema detectó solo, para ti.',
+    '👉 "Ver expediente" te lleva al detalle de esa obra.',
+  ],
+  intel: [
+    '🔍 ¿Qué es? Análisis de la competencia con datos históricos públicos del Estado (CONOSCE/OSCE).',
+    '🏢 Descubre QUÉ ENTIDADES compran más ese tipo de obra — a quiénes conviene apuntar.',
+    '🏆 Mira QUIÉNES GANAN los contratos — identifica a tus competidores reales en el rubro.',
+    '📂 Conoce las CATEGORÍAS de contratación más frecuentes del sector.',
+    '⚙️ Cómo usar: escribe una palabra clave (ej. "puente") + un año, y dale "Analizar mercado".',
+    '📊 Ejemplo: "puentes 2025" → qué municipalidades licitan más y qué consorcios les ganan.',
+  ],
+};
 
-function startIntelTips() {
-  const el = byId('intel-tip-text');
-  if (!el) return;
-  let idx = 0;
-  el.textContent = INTEL_TIPS[0];
-  if (_intelTipTimer) return; // ya está rotando
-  _intelTipTimer = setInterval(() => {
-    idx = (idx + 1) % INTEL_TIPS.length;
-    el.style.opacity = '0';
-    setTimeout(() => {
-      el.textContent = INTEL_TIPS[idx];
-      el.style.opacity = '1';
-    }, 300);
-  }, 6000);
+function startTipsRotation() {
+  document.querySelectorAll('[data-tips]').forEach(el => {
+    const tips = SECTION_TIPS[el.dataset.tips];
+    if (!tips || !tips.length || el.dataset.tipsRunning) return;
+    el.dataset.tipsRunning = '1';
+    let idx = 0;
+    el.textContent = tips[0];
+    setInterval(() => {
+      idx = (idx + 1) % tips.length;
+      el.style.opacity = '0';
+      setTimeout(() => {
+        el.textContent = tips[idx];
+        el.style.opacity = '1';
+      }, 300);
+    }, 6000);
+  });
 }
 
 async function start() {
@@ -1100,7 +1128,7 @@ async function start() {
   setupFilters(state.dashboard);
   renderTable(state.filtered);
   bindEvents();
-  startIntelTips();
+  startTipsRotation();
 }
 
 async function bootstrap() {

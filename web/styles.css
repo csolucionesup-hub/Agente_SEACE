@@ -408,4 +408,4 @@ body.locked { overflow: hidden; }
   font-size: 14px; color: var(--text); min-height: 46px;
 }
 .tips-banner .tips-icon { font-size: 18px; flex-shrink: 0; }
-.tips-banner #intel-tip-text { transition: opacity .3s ease; }
+.tips-banner .tip-text { transition: opacity .3s ease; }
