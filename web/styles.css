@@ -398,3 +398,14 @@ body.locked { overflow: hidden; }
 
 /* Columna izquierda del detalle: apila Inteligencia/ficha + Timeline */
 .detail-left-col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+
+/* Banner de consejos rotativos (Inteligencia de mercado) */
+.tips-banner {
+  display: flex; align-items: center; gap: 12px;
+  background: linear-gradient(90deg, rgba(14,163,106,0.10), rgba(11,67,165,0.05));
+  border: 1px solid var(--line); border-left: 4px solid var(--brand-2);
+  border-radius: 12px; padding: 12px 16px; margin-bottom: 16px;
+  font-size: 14px; color: var(--text); min-height: 46px;
+}
+.tips-banner .tips-icon { font-size: 18px; flex-shrink: 0; }
+.tips-banner #intel-tip-text { transition: opacity .3s ease; }

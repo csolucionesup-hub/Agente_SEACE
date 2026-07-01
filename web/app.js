@@ -1061,6 +1061,32 @@ function renderRankingPanel(title, items, nameKey, countKey, unit = '') {
   </div>`;
 }
 
+const INTEL_TIPS = [
+  '🔍 ¿Qué es? Análisis de la competencia con datos históricos públicos del Estado (CONOSCE/OSCE).',
+  '🏢 Descubre QUÉ ENTIDADES compran más ese tipo de obra — a quiénes conviene apuntar.',
+  '🏆 Mira QUIÉNES GANAN los contratos — identifica a tus competidores reales en el rubro.',
+  '📂 Conoce las CATEGORÍAS de contratación más frecuentes del sector.',
+  '⚙️ Cómo usar: escribe una palabra clave (ej. "puente") + un año, y dale "Analizar mercado".',
+  '📊 Ejemplo: "puentes 2025" → qué municipalidades licitan más y qué consorcios les ganan.',
+];
+let _intelTipTimer = null;
+
+function startIntelTips() {
+  const el = byId('intel-tip-text');
+  if (!el) return;
+  let idx = 0;
+  el.textContent = INTEL_TIPS[0];
+  if (_intelTipTimer) return; // ya está rotando
+  _intelTipTimer = setInterval(() => {
+    idx = (idx + 1) % INTEL_TIPS.length;
+    el.style.opacity = '0';
+    setTimeout(() => {
+      el.textContent = INTEL_TIPS[idx];
+      el.style.opacity = '1';
+    }, 300);
+  }, 6000);
+}
+
 async function start() {
   const response = await fetch('/api/dashboard');
   state.dashboard = await response.json();
@@ -1074,6 +1100,7 @@ async function start() {
   setupFilters(state.dashboard);
   renderTable(state.filtered);
   bindEvents();
+  startIntelTips();
 }
 
 async function bootstrap() {
