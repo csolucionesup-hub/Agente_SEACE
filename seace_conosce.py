@@ -83,14 +83,33 @@ def _field(row: dict[str, str], *candidates: str) -> str:
     return ""
 
 
-def summarize_rows(rows: list[dict[str, str]], keyword: str = "") -> dict[str, Any]:
+def _row_amount(row: dict[str, str]) -> float:
+    return _to_float(_field(row, "MONTOREFERENCIAL", "MONTO_REFERENCIAL", "MONTO", "VALOR_REFERENCIAL"))
+
+
+def summarize_rows(rows: list[dict[str, str]], keyword: str = "", min_amount: float = 0,
+                   negative_keywords: list[str] | None = None) -> dict[str, Any]:
     keyword_lower = keyword.strip().lower()
-    filtered = rows
-    if keyword_lower:
-        filtered = [row for row in rows if keyword_lower in " ".join(row.values()).lower()]
+    negs = [str(n).strip().lower() for n in (negative_keywords or []) if str(n).strip()]
+
+    filtered: list[dict[str, str]] = []
+    for row in rows:
+        # La keyword se busca en la DESCRIPCIÓN/objeto de la obra, NO en toda la fila: así
+        # una "Municipalidad de Puente Piedra" comprando frijoles ya NO matchea "puente".
+        objeto = " ".join([
+            _field(row, "DESCRIPCION_PROCESO", "DESCRIPCION_ITEM", "DESCRIPCION"),
+            _field(row, "OBJETOCONTRACTUAL", "OBJETO_CONTRATACION"),
+        ]).lower()
+        if keyword_lower and keyword_lower not in objeto:
+            continue
+        if negs and any(neg in objeto for neg in negs):  # anti-diccionario (ej. "puente piedra")
+            continue
+        if min_amount and _row_amount(row) < min_amount:  # respeta el monto mínimo del cliente
+            continue
+        filtered.append(row)
 
     total = len(filtered)
-    total_amount = sum(_to_float(_field(row, "MONTOREFERENCIAL", "MONTO_REFERENCIAL", "MONTO", "VALOR_REFERENCIAL")) for row in filtered)
+    total_amount = sum(_row_amount(row) for row in filtered)
 
     entity_counts: dict[str, int] = {}
     category_counts: dict[str, int] = {}
@@ -160,11 +179,13 @@ def _save_cache(year: int, rows: list[dict[str, str]]) -> None:
     path.write_text(json.dumps({"rows": rows}, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def fetch_market_intel(keyword: str = "", year: int | None = None, force_refresh: bool = False) -> dict[str, Any]:
+def fetch_market_intel(keyword: str = "", year: int | None = None, force_refresh: bool = False,
+                       min_amount: float = 0, negative_keywords: list[str] | None = None) -> dict[str, Any]:
     """Return market intelligence summary from CONOSCE data.
 
-    Downloads and caches the XLSX for the requested year. Returns a summary
-    filtered by keyword if provided. Falls back gracefully if unavailable.
+    Downloads and caches the XLSX for the requested year. Filtra por keyword (en la
+    descripción), monto mínimo y anti-diccionario para que el análisis sea relevante al
+    nicho del cliente. Falls back gracefully if unavailable.
     """
     target_year = year or date.today().year
 
@@ -173,7 +194,7 @@ def fetch_market_intel(keyword: str = "", year: int | None = None, force_refresh
         cached_rows = _load_cache(target_year)
         if cached_rows is not None:
             logger.debug("CONOSCE: cache hit for %d (%d rows)", target_year, len(cached_rows))
-            return summarize_rows(cached_rows, keyword)
+            return summarize_rows(cached_rows, keyword, min_amount, negative_keywords)
 
     # Download
     rows: list[dict[str, str]] = []
@@ -213,6 +234,6 @@ def fetch_market_intel(keyword: str = "", year: int | None = None, force_refresh
             ),
         }
 
-    result = summarize_rows(rows, keyword)
+    result = summarize_rows(rows, keyword, min_amount, negative_keywords)
     result["status"] = "ok"
     return result

@@ -1251,9 +1251,20 @@ def create_app(
         )
 
     @app.get("/api/market-intel")
-    def market_intel(keyword: str = "", year: int | None = None, force_refresh: bool = False) -> dict[str, Any]:
-        """Return CONOSCE market intelligence: top entities, categories and winners."""
-        return fetch_market_intel(keyword=keyword, year=year, force_refresh=force_refresh)
+    def market_intel(keyword: str = "", year: int | None = None, force_refresh: bool = False,
+                     min_amount: float | None = None) -> dict[str, Any]:
+        """Return CONOSCE market intelligence: top entities, categories and winners.
+
+        Aplica el MONTO MÍNIMO y el anti-diccionario del cliente (settings) para que el
+        análisis sea del nicho: sin obras chicas ni ruido (p. ej. "Municipalidad de Puente
+        Piedra" comprando frijoles ya no cuenta como obra de "puente").
+        """
+        settings = load_settings(settings_path)
+        effective_min = settings["min_amount"] if min_amount is None else min_amount
+        return fetch_market_intel(
+            keyword=keyword, year=year, force_refresh=force_refresh,
+            min_amount=effective_min, negative_keywords=settings.get("negative_keywords") or [],
+        )
 
     @app.get("/api/export/xlsx")
     def export_xlsx() -> Response:

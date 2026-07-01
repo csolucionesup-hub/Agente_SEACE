@@ -35,3 +35,35 @@ def test_summarize_sin_keyword_cuenta_todas():
     r = summarize_rows(_rows())
     assert r["total_records"] == 4
     assert r["total_amount"] == 3800000.0
+
+
+def test_keyword_matchea_descripcion_no_la_entidad():
+    # "Municipalidad de Puente Piedra" comprando frijoles NO debe contar como obra de "puente".
+    rows = [
+        {"ENTIDAD": "MUNICIPALIDAD DE PUENTE PIEDRA", "OBJETOCONTRACTUAL": "Bien",
+         "MONTOREFERENCIAL": "5000000", "DESCRIPCION_PROCESO": "Adquisicion de frijol y trigo"},
+        {"ENTIDAD": "OTRA ENTIDAD", "OBJETOCONTRACTUAL": "Obra",
+         "MONTOREFERENCIAL": "2000000", "DESCRIPCION_PROCESO": "Construccion de puente vehicular"},
+    ]
+    r = summarize_rows(rows, keyword="puente")
+    assert r["total_records"] == 1  # solo la de construccion de puente (no el frijol)
+    assert "puente" in r["sample_records"][0]["description"].lower()
+
+
+def test_respeta_el_monto_minimo():
+    rows = [
+        {"OBJETOCONTRACTUAL": "Obra", "MONTOREFERENCIAL": "500000", "DESCRIPCION_PROCESO": "puente chico"},
+        {"OBJETOCONTRACTUAL": "Obra", "MONTOREFERENCIAL": "2000000", "DESCRIPCION_PROCESO": "puente grande"},
+    ]
+    r = summarize_rows(rows, keyword="puente", min_amount=1000000)
+    assert r["total_records"] == 1  # solo el de 2M
+    assert r["total_amount"] == 2000000.0
+
+
+def test_anti_diccionario_excluye_negativas():
+    rows = [
+        {"OBJETOCONTRACTUAL": "Obra", "MONTOREFERENCIAL": "2000000", "DESCRIPCION_PROCESO": "obra en puente piedra distrito"},
+        {"OBJETOCONTRACTUAL": "Obra", "MONTOREFERENCIAL": "2000000", "DESCRIPCION_PROCESO": "rehabilitacion de puente real"},
+    ]
+    r = summarize_rows(rows, keyword="puente", negative_keywords=["puente piedra"])
+    assert r["total_records"] == 1  # se excluye la de "puente piedra"
