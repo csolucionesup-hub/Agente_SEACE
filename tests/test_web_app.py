@@ -468,6 +468,35 @@ def test_api_track_adds_ocid_and_regenerates_dashboard(tmp_path):
     assert dashboard.json()["opportunities"][0]["ocid"] == "ocds-test-search-1"
 
 
+def test_api_intel_track_resolves_process_code_to_ocid(tmp_path):
+    dashboard_path = tmp_path / "dashboard.json"
+    db_path = tmp_path / "tracking.sqlite3"
+    fake = FakeSearchClient()
+    client = TestClient(create_app(dashboard_path=dashboard_path, tracking_db_path=db_path, seace_client=fake))
+
+    # Inteligencia (CONOSCE) solo tiene la nomenclatura; debe resolverse al OCID de OECE.
+    response = client.post("/api/intel/track", json={"process_code": "LP-001-2026-PUENTE", "year": "2026"})
+    dashboard = client.get("/api/dashboard")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["resolved"] is True
+    assert body["ocid"] == "ocds-test-search-1"
+    assert dashboard.json()["opportunities"][0]["ocid"] == "ocds-test-search-1"
+
+
+def test_api_intel_track_reports_when_not_found(tmp_path):
+    fake = FakeSearchClient()
+    client = TestClient(create_app(dashboard_path=tmp_path / "dashboard.json",
+                                   tracking_db_path=tmp_path / "tracking.sqlite3", seace_client=fake))
+
+    response = client.post("/api/intel/track", json={"process_code": "ZZZ-999-INEXISTENTE"})
+
+    assert response.status_code == 200
+    assert response.json()["resolved"] is False
+    assert "message" in response.json()
+
+
 def test_settings_defaults_and_persistence(tmp_path):
     settings_path = tmp_path / "settings.json"
     defaults = load_settings(settings_path)

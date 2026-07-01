@@ -747,6 +747,35 @@ async function trackOcid(ocid, button) {
   byId('search-status').textContent = 'Expediente agregado al seguimiento y dashboard actualizado.';
 }
 
+async function trackIntel(processCode, description, button) {
+  if (!processCode) return;
+  const status = byId('market-intel-status');
+  button.disabled = true;
+  button.textContent = 'Buscando…';
+  try {
+    const response = await fetch('/api/intel/track', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ process_code: processCode, description, year: state.intelYear || '' }),
+    });
+    const data = await response.json();
+    if (!response.ok || data.resolved === false) {
+      button.disabled = false;
+      button.textContent = '➕ Seguir';
+      if (status) status.textContent = data.message || 'No se pudo agregar al seguimiento.';
+      return;
+    }
+    button.textContent = 'En bandeja ✓';
+    if (status) status.textContent = `"${processCode}" agregada al seguimiento. Revísala en Bandeja.`;
+    // Refresca el dashboard/bandeja en segundo plano.
+    state.dashboard = await (await fetch('/api/dashboard')).json();
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = '➕ Seguir';
+    if (status) status.textContent = `Error: ${escapeHtml(error.message)}`;
+  }
+}
+
 async function untrackOcid(ocid, button) {
   if (!ocid) return;
   if (!confirm('¿Quitar esta obra del seguimiento? Volverá a aparecer en la búsqueda.')) return;
@@ -959,6 +988,8 @@ function bindEvents() {
     }
     if (event.target.id === 'intelPrevPage') { state.intelPage = (state.intelPage || 1) - 1; renderIntelPage(); }
     if (event.target.id === 'intelNextPage') { state.intelPage = (state.intelPage || 1) + 1; renderIntelPage(); }
+    const intelTrack = event.target.closest('[data-intel-track]');
+    if (intelTrack) trackIntel(intelTrack.dataset.intelTrack, intelTrack.dataset.intelDesc || '', intelTrack);
     const deleteKeyword = event.target.closest('[data-delete-keyword]');
     const deleteChannel = event.target.closest('[data-delete-channel]');
     const deleteCustom = event.target.closest('[data-delete-custom]');
@@ -1027,6 +1058,7 @@ async function runMarketIntel(event) {
 
     if (resultsEl) {
       state.intelRecords = data.sample_records || [];
+      state.intelYear = year;
       state.intelPage = 1;
       resultsEl.innerHTML = `
         <div class="dashboard-grid">
@@ -1057,12 +1089,13 @@ function renderIntelPage() {
   const slice = records.slice((page - 1) * size, page * size);
   container.innerHTML = `
     <div class="table-wrap"><table>
-      <thead><tr><th>Entidad</th><th>Descripción</th><th>Monto</th><th>Código</th></tr></thead>
+      <thead><tr><th>Entidad</th><th>Descripción</th><th>Monto</th><th>Código</th><th></th></tr></thead>
       <tbody>${slice.map(r => `<tr>
         <td>${escapeHtml(r.entity || '')}</td>
         <td>${escapeHtml(r.description || '')}</td>
         <td>${formatMoney(r.amount)}</td>
         <td>${escapeHtml(r.process_code || '')}</td>
+        <td>${r.process_code ? `<button type="button" class="link-button" data-intel-track="${escapeHtml(r.process_code)}" data-intel-desc="${escapeHtml(r.description || '')}" title="Busca esta obra en la API OECE y la agrega a tu bandeja de seguimiento.">➕ Seguir</button>` : ''}</td>
       </tr>`).join('')}</tbody>
     </table></div>
     ${totalPages > 1 ? `<div class="search-pagination">

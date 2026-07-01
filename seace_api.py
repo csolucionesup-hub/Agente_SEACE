@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 import csv
 import json
 import os
+import re
 import time
 
 import httpx
@@ -226,6 +227,34 @@ def normalize_search_result(result: dict[str, Any], keyword: str, base_url: str 
         source=first_source,
         api_url=f"{base_url.rstrip('/')}/api/v1/record/{ocid}?format=json" if ocid else "",
     )
+
+
+def _norm_nomenclatura(value: str) -> str:
+    """Normaliza una nomenclatura SEACE para comparar (sin espacios, mayúsculas)."""
+    return re.sub(r"\s+", "", str(value or "")).upper()
+
+
+def match_ocid_by_process_code(opportunities: list[Opportunity], process_code: str) -> str:
+    """Devuelve el ``ocid`` cuya nomenclatura coincide con ``process_code``.
+
+    Los registros de Inteligencia (CONOSCE) traen la nomenclatura del proceso
+    (ej. ``CP-SM-2-2025-INVERMET-1``) pero no el OCID que necesita el seguimiento.
+    La API OECE sí expone esa nomenclatura como ``tender.title`` (== process_code aquí),
+    así que se busca en OECE por el código y se empareja: primero exacto y, si no,
+    por la nomenclatura base (sin el sufijo ``-N`` de número de convocatoria).
+    """
+    target = _norm_nomenclatura(process_code)
+    if not target:
+        return ""
+    for opp in opportunities:
+        if opp.ocid and _norm_nomenclatura(opp.process_code) == target:
+            return opp.ocid
+    base = re.sub(r"-\d+$", "", target)
+    if base and base != target:
+        for opp in opportunities:
+            if opp.ocid and re.sub(r"-\d+$", "", _norm_nomenclatura(opp.process_code)) == base:
+                return opp.ocid
+    return ""
 
 
 def export_opportunities_csv(opportunities: list[Opportunity], path: str | Path) -> Path:

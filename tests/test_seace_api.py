@@ -8,8 +8,35 @@ from seace_api import (
     Opportunity,
     SeaceApiClient,
     export_opportunities_csv,
+    match_ocid_by_process_code,
     normalize_search_result,
 )
+
+
+def _opp(ocid, process_code):
+    return Opportunity(
+        keyword="", ocid=ocid, tender_id="", process_code=process_code, entity_name="",
+        entity_id="", description="", category="works", procurement_method="", amount=None,
+        currency="", date="", tender_start_date="", tender_end_date="", source="", api_url="",
+    )
+
+
+def test_match_ocid_exacto_por_nomenclatura():
+    opps = [_opp("ocid-a", "CP-SM-2-2025-INVERMET-1"), _opp("ocid-b", "LP-SM-1-2025-MTC/20-1")]
+    assert match_ocid_by_process_code(opps, "cp-sm-2-2025-invermet-1") == "ocid-a"
+    assert match_ocid_by_process_code(opps, "LP-SM-1-2025-MTC/20-1") == "ocid-b"
+
+
+def test_match_ocid_por_nomenclatura_base_sin_sufijo():
+    # CONOSCE trae "...-MPC-2" y OECE tiene "...-MPC-1": empareja por la base sin el -N.
+    opps = [_opp("ocid-x", "AS-SM-44-2024-CS/MDSMP-1")]
+    assert match_ocid_by_process_code(opps, "AS-SM-44-2024-CS/MDSMP-2") == "ocid-x"
+
+
+def test_match_ocid_sin_coincidencia_devuelve_vacio():
+    opps = [_opp("ocid-a", "CP-SM-2-2025-INVERMET-1")]
+    assert match_ocid_by_process_code(opps, "ZZZ-999-INEXISTENTE") == ""
+    assert match_ocid_by_process_code(opps, "") == ""
 
 
 SAMPLE_SEARCH_RESULT = {

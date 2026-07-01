@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 
 from seace_commercial_scoring import enrich_opportunity
 from seace_relevance import score_relevance
-from seace_api import Opportunity, SeaceApiClient
+from seace_api import Opportunity, SeaceApiClient, match_ocid_by_process_code
 from seace_oportunidades import collect_opportunities
 from seace_seguimiento import sync_ocids
 from seace_tracking import TrackingStore, export_dashboard_json
@@ -1082,6 +1082,47 @@ def create_app(
         store.initialize()
         events = sync_ocids(api_client, store, ocids, dashboard_path=dashboard_path)
         return {"tracked": ocids, "events": len(events), "dashboard": str(dashboard_path)}
+
+    @app.post("/api/intel/track")
+    async def intel_track(request: Request) -> dict[str, Any]:
+        """Agrega al seguimiento una obra vista en Inteligencia (CONOSCE).
+
+        CONOSCE solo trae la nomenclatura del proceso, no el OCID. Se resuelve
+        buscándola en la API OECE y emparejando por nomenclatura; luego se sincroniza
+        igual que cualquier otra obra del seguimiento.
+        """
+        payload = await request.json()
+        process_code = str(payload.get("process_code", "")).strip()
+        description = str(payload.get("description", "")).strip()
+        year_raw = str(payload.get("year", "")).strip()
+        if not process_code and not description:
+            raise HTTPException(status_code=400, detail="process_code or description is required")
+
+        year = int(year_raw) if year_raw.isdigit() and len(year_raw) == 4 else None
+        ocid = ""
+        for query in [q for q in (process_code, description[:80]) if q]:
+            try:
+                results = api_client.search_opportunities(query, page=1, paginate_by=20, year=year)
+            except Exception:  # pragma: no cover - la red puede fallar
+                continue
+            ocid = match_ocid_by_process_code(results, process_code)
+            if ocid:
+                break
+
+        if not ocid:
+            return {
+                "resolved": False,
+                "message": (
+                    "No encontré esta obra en la API OECE por su código. "
+                    "Puede ser un proceso antiguo o de otra fuente. "
+                    "Prueba buscarla en 'Nueva búsqueda' por palabra clave."
+                ),
+            }
+
+        store = TrackingStore(tracking_db_path)
+        store.initialize()
+        events = sync_ocids(api_client, store, [ocid], dashboard_path=dashboard_path)
+        return {"resolved": True, "ocid": ocid, "events": len(events), "dashboard": str(dashboard_path)}
 
     @app.post("/api/untrack")
     async def untrack_opportunities(request: Request) -> dict[str, Any]:
