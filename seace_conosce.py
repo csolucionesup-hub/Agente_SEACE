@@ -112,34 +112,41 @@ def summarize_rows(rows: list[dict[str, str]], keyword: str = "", min_amount: fl
     total_amount = sum(_row_amount(row) for row in filtered)
 
     entity_counts: dict[str, int] = {}
+    entity_amounts: dict[str, float] = {}
     category_counts: dict[str, int] = {}
+    category_amounts: dict[str, float] = {}
     winner_counts: dict[str, int] = {}
 
     for row in filtered:
+        amount = _row_amount(row)
         entity = _field(row, "ENTIDAD", "NOMBRE_ENTIDAD", "ENTIDAD_COMPRADORA")
         if entity:
             entity_counts[entity] = entity_counts.get(entity, 0) + 1
+            entity_amounts[entity] = entity_amounts.get(entity, 0.0) + amount
 
         category = _field(row, "OBJETOCONTRACTUAL", "OBJETO_CONTRATACION", "TIPOPROCESOSELECCION", "TIPO_OBJETO", "OBJETO")
         if category:
             category_counts[category] = category_counts.get(category, 0) + 1
+            category_amounts[category] = category_amounts.get(category, 0.0) + amount
 
         winner = _field(row, "GANADOR", "PROVEEDOR", "POSTOR_GANADOR", "NOMBRE_POSTOR")
         if winner:
             winner_counts[winner] = winner_counts.get(winner, 0) + 1
 
+    def _rank_by_amount(amounts: dict[str, float], counts: dict[str, int]) -> list[dict[str, Any]]:
+        # Se ordena por MONTO total (no por cantidad): al nicho del cliente le importa el
+        # alto ticket (obras grandes con más chance de necesitar sus servicios).
+        return [
+            {"name": name, "amount": round(amt, 2), "count": counts.get(name, 0)}
+            for name, amt in sorted(amounts.items(), key=lambda x: x[1], reverse=True)[:10]
+        ]
+
     return {
         "total_records": total,
         "total_amount": round(total_amount, 2),
         "keyword_filter": keyword,
-        "top_entities": [
-            {"name": name, "count": count}
-            for name, count in sorted(entity_counts.items(), key=lambda x: x[1], reverse=True)[:10]
-        ],
-        "top_categories": [
-            {"name": name, "count": count}
-            for name, count in sorted(category_counts.items(), key=lambda x: x[1], reverse=True)[:10]
-        ],
+        "top_entities": _rank_by_amount(entity_amounts, entity_counts),
+        "top_categories": _rank_by_amount(category_amounts, category_counts),
         "top_winners": [
             {"name": name, "count": count}
             for name, count in sorted(winner_counts.items(), key=lambda x: x[1], reverse=True)[:10]
@@ -148,11 +155,12 @@ def summarize_rows(rows: list[dict[str, str]], keyword: str = "", min_amount: fl
             {
                 "entity": _field(row, "ENTIDAD", "NOMBRE_ENTIDAD"),
                 "description": _field(row, "DESCRIPCION_PROCESO", "DESCRIPCION_ITEM", "DESCRIPCION", "OBJETO"),
-                "amount": _to_float(_field(row, "MONTOREFERENCIAL", "MONTO_REFERENCIAL", "MONTO")),
+                "amount": _row_amount(row),
                 "year": _field(row, "ANIO", "YEAR", "AÑO"),
                 "process_code": _field(row, "PROCESO", "CODIGOCONVOCATORIA", "NUMERO_EXPEDIENTE", "NOMENCLATURA"),
             }
-            for row in filtered[:5]
+            # Ordenadas de MAYOR a menor monto (los hallazgos de más alto ticket primero).
+            for row in sorted(filtered, key=_row_amount, reverse=True)[:20]
         ],
     }
 

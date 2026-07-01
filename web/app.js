@@ -1025,12 +1025,12 @@ async function runMarketIntel(event) {
     if (resultsEl) {
       resultsEl.innerHTML = `
         <div class="dashboard-grid">
-          ${renderRankingPanel('Entidades que más compran', data.top_entities || [], 'name', 'count', 'procesos')}
-          ${renderRankingPanel('Categorías de contratación', data.top_categories || [], 'name', 'count', 'procesos')}
-          ${renderRankingPanel('Ganadores recurrentes', data.top_winners || [], 'name', 'count', 'adj.')}
+          ${renderRankingPanel('Entidades que más contratan (por monto)', data.top_entities || [], 'amount')}
+          ${renderRankingPanel('Categorías (por monto)', data.top_categories || [], 'amount')}
+          ${renderRankingPanel('Ganadores recurrentes', data.top_winners || [], 'count', 'adj.')}
         </div>
         ${data.sample_records?.length ? `<div class="panel">
-          <h2>Muestra de registros</h2>
+          <h2>Obras de mayor monto (mayor ticket)</h2>
           <div class="table-wrap"><table>
             <thead><tr><th>Entidad</th><th>Descripción</th><th>Monto</th><th>Código</th></tr></thead>
             <tbody>${data.sample_records.map(r => `<tr>
@@ -1048,15 +1048,17 @@ async function runMarketIntel(event) {
   }
 }
 
-function renderRankingPanel(title, items, nameKey, countKey, unit = '') {
+function renderRankingPanel(title, items, mode = 'count', unit = '') {
   if (!items.length) return `<div class="panel"><h2>${escapeHtml(title)}</h2><p>Sin datos.</p></div>`;
-  const max = Math.max(1, ...items.map(item => item[countKey] || 0));
+  const byMoney = mode === 'amount';
+  const valueOf = item => (byMoney ? (item.amount || 0) : (item.count || 0));
+  const max = Math.max(1, ...items.map(valueOf));
   return `<div class="panel">
     <h2>${escapeHtml(title)}</h2>
     <div class="bars">${items.map(item => `<div class="bar-row">
-      <span title="${escapeHtml(item[nameKey])}">${escapeHtml(String(item[nameKey] || '').slice(0, 35))}</span>
-      <div class="bar-track"><div class="bar-fill" style="width:${((item[countKey] || 0) / max) * 100}%"></div></div>
-      <strong>${item[countKey]} ${escapeHtml(unit)}</strong>
+      <span title="${escapeHtml(item.name)}">${escapeHtml(String(item.name || '').slice(0, 40))}</span>
+      <div class="bar-track"><div class="bar-fill" style="width:${(valueOf(item) / max) * 100}%"></div></div>
+      <strong>${byMoney ? formatMoney(item.amount) : `${item.count} ${escapeHtml(unit)}`}</strong>
     </div>`).join('')}</div>
   </div>`;
 }
