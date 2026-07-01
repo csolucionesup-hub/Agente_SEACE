@@ -90,7 +90,7 @@ def summarize_rows(rows: list[dict[str, str]], keyword: str = "") -> dict[str, A
         filtered = [row for row in rows if keyword_lower in " ".join(row.values()).lower()]
 
     total = len(filtered)
-    total_amount = sum(_to_float(_field(row, "MONTO_REFERENCIAL", "MONTO", "VALOR_REFERENCIAL")) for row in filtered)
+    total_amount = sum(_to_float(_field(row, "MONTOREFERENCIAL", "MONTO_REFERENCIAL", "MONTO", "VALOR_REFERENCIAL")) for row in filtered)
 
     entity_counts: dict[str, int] = {}
     category_counts: dict[str, int] = {}
@@ -101,7 +101,7 @@ def summarize_rows(rows: list[dict[str, str]], keyword: str = "") -> dict[str, A
         if entity:
             entity_counts[entity] = entity_counts.get(entity, 0) + 1
 
-        category = _field(row, "OBJETO_CONTRATACION", "TIPO_OBJETO", "OBJETO")
+        category = _field(row, "OBJETOCONTRACTUAL", "OBJETO_CONTRATACION", "TIPOPROCESOSELECCION", "TIPO_OBJETO", "OBJETO")
         if category:
             category_counts[category] = category_counts.get(category, 0) + 1
 
@@ -128,10 +128,10 @@ def summarize_rows(rows: list[dict[str, str]], keyword: str = "") -> dict[str, A
         "sample_records": [
             {
                 "entity": _field(row, "ENTIDAD", "NOMBRE_ENTIDAD"),
-                "description": _field(row, "DESCRIPCION", "OBJETO_CONTRATACION", "OBJETO"),
-                "amount": _to_float(_field(row, "MONTO_REFERENCIAL", "MONTO")),
+                "description": _field(row, "DESCRIPCION_PROCESO", "DESCRIPCION_ITEM", "DESCRIPCION", "OBJETO"),
+                "amount": _to_float(_field(row, "MONTOREFERENCIAL", "MONTO_REFERENCIAL", "MONTO")),
                 "year": _field(row, "ANIO", "YEAR", "AÑO"),
-                "process_code": _field(row, "NUMERO_EXPEDIENTE", "NOMENCLATURA", "CODIGO"),
+                "process_code": _field(row, "PROCESO", "CODIGOCONVOCATORIA", "NUMERO_EXPEDIENTE", "NOMENCLATURA"),
             }
             for row in filtered[:5]
         ],
