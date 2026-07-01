@@ -20,16 +20,23 @@ import urllib.request
 
 logger = logging.getLogger(__name__)
 
-CONOSCE_BASE = "https://conosce.osce.gob.pe/buscador/assets/67ae6c4a/reportes/convocatorias"
+CONOSCE_REPORTS_BASE = "https://conosce.osce.gob.pe/buscador/assets/67ae6c4a/reportes"
+CONOSCE_BASE = f"{CONOSCE_REPORTS_BASE}/convocatorias"  # compat retro
 CACHE_DIR = Path("data/conosce")
 CACHE_TTL_SECONDS = 86400  # 24 h
 
+# Cada "reporte" CONOSCE es un XLSX distinto: 'convocatorias' (lo que se licita) y
+# 'adjudicaciones' (quién ganó). El token va en mayúsculas dentro del nombre de archivo.
+_REPORT_TOKENS = {"convocatorias": "CONVOCATORIAS", "adjudicaciones": "ADJUDICACIONES"}
 
-def _candidate_urls(year: int) -> list[str]:
+
+def _candidate_urls(year: int, report: str = "convocatorias") -> list[str]:
+    token = _REPORT_TOKENS.get(report, report.upper())
+    base = f"{CONOSCE_REPORTS_BASE}/{report}"
     return [
-        f"{CONOSCE_BASE}/{year}/CONOSCE_CONVOCATORIAS{year}_0.xlsx",
-        f"{CONOSCE_BASE}/{year}/CONOSCE_CONVOCATORIAS{year}_1.xlsx",
-        f"{CONOSCE_BASE}/{year}/CONOSCE_CONVOCATORIAS{year}.xlsx",
+        f"{base}/{year}/CONOSCE_{token}{year}_0.xlsx",
+        f"{base}/{year}/CONOSCE_{token}{year}_1.xlsx",
+        f"{base}/{year}/CONOSCE_{token}{year}.xlsx",
     ]
 
 
@@ -166,13 +173,66 @@ def summarize_rows(rows: list[dict[str, str]], keyword: str = "", min_amount: fl
     }
 
 
-def _cache_key_path(year: int) -> Path:
+def summarize_winners(rows: list[dict[str, str]], keyword: str = "", min_amount: float = 0,
+                      negative_keywords: list[str] | None = None) -> list[dict[str, Any]]:
+    """Ranking de ganadores recurrentes a partir del reporte de ADJUDICACIONES.
+
+    El archivo de adjudicaciones viene a nivel de ÍTEM, así que primero se agrega por
+    proceso (CODIGOCONVOCATORIA): se suman los montos adjudicados y se toma el ganador
+    (PROVEEDOR). Luego se filtra por keyword-en-descripción, anti-diccionario y monto
+    mínimo, y se rankea a los ganadores por MONTO total adjudicado (criterio alto ticket).
+    """
+    keyword_lower = keyword.strip().lower()
+    negs = [str(n).strip().lower() for n in (negative_keywords or []) if str(n).strip()]
+
+    procesos: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        code = _field(row, "CODIGOCONVOCATORIA", "PROCESO")
+        if not code:
+            continue
+        proc = procesos.get(code)
+        if proc is None:
+            proc = {"objeto": "", "winner": "", "amount": 0.0}
+            procesos[code] = proc
+        proc["amount"] += _to_float(
+            _field(row, "MONTO_ADJUDICADO_ITEM_SOLES", "MONTO_REFERENCIAL_ITEM_SOLES", "MONTOREFERENCIAL")
+        )
+        if not proc["objeto"]:
+            proc["objeto"] = " ".join([
+                _field(row, "DESCRIPCION_PROCESO", "DESCRIPCION_ITEM", "DESCRIPCION"),
+                _field(row, "OBJETOCONTRACTUAL", "OBJETO_CONTRATACION"),
+            ]).lower()
+        if not proc["winner"]:
+            proc["winner"] = _field(row, "PROVEEDOR", "GANADOR", "POSTOR_GANADOR", "NOMBRE_POSTOR")
+
+    winner_amounts: dict[str, float] = {}
+    winner_counts: dict[str, int] = {}
+    for proc in procesos.values():
+        if keyword_lower and keyword_lower not in proc["objeto"]:
+            continue
+        if negs and any(neg in proc["objeto"] for neg in negs):
+            continue
+        if min_amount and proc["amount"] < min_amount:
+            continue
+        winner = proc["winner"]
+        if not winner:
+            continue
+        winner_amounts[winner] = winner_amounts.get(winner, 0.0) + proc["amount"]
+        winner_counts[winner] = winner_counts.get(winner, 0) + 1
+
+    return [
+        {"name": winner, "amount": round(amt, 2), "count": winner_counts.get(winner, 0)}
+        for winner, amt in sorted(winner_amounts.items(), key=lambda x: x[1], reverse=True)[:10]
+    ]
+
+
+def _cache_key_path(year: int, report: str = "convocatorias") -> Path:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    return CACHE_DIR / f"convocatorias_{year}.json"
+    return CACHE_DIR / f"{report}_{year}.json"
 
 
-def _load_cache(year: int) -> list[dict[str, str]] | None:
-    path = _cache_key_path(year)
+def _load_cache(year: int, report: str = "convocatorias") -> list[dict[str, str]] | None:
+    path = _cache_key_path(year, report)
     if not path.exists():
         return None
     if (time.time() - path.stat().st_mtime) > CACHE_TTL_SECONDS:
@@ -183,9 +243,42 @@ def _load_cache(year: int) -> list[dict[str, str]] | None:
         return None
 
 
-def _save_cache(year: int, rows: list[dict[str, str]]) -> None:
-    path = _cache_key_path(year)
+def _save_cache(year: int, rows: list[dict[str, str]], report: str = "convocatorias") -> None:
+    path = _cache_key_path(year, report)
     path.write_text(json.dumps({"rows": rows}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _fetch_report_rows(year: int, report: str = "convocatorias", force_refresh: bool = False) -> list[dict[str, str]]:
+    """Descarga (o lee de cache) las filas de un reporte CONOSCE para un año.
+
+    Cachea 24 h. Si la descarga falla, cae a la cache expirada como último recurso.
+    Devuelve [] si no hay nada disponible (ej. adjudicaciones del año en curso aún sin publicar).
+    """
+    if not force_refresh:
+        cached = _load_cache(year, report)
+        if cached is not None:
+            logger.debug("CONOSCE: cache hit %s %d (%d filas)", report, year, len(cached))
+            return cached
+
+    rows: list[dict[str, str]] = []
+    for url in _candidate_urls(year, report):
+        data = _download_bytes(url)
+        if data:
+            rows = _parse_xlsx_rows(data)
+            if rows:
+                _save_cache(year, rows, report)
+                logger.info("CONOSCE: %d filas de %s", len(rows), url)
+                break
+
+    if not rows:  # último recurso: cache expirada
+        path = _cache_key_path(year, report)
+        if path.exists():
+            try:
+                rows = json.loads(path.read_text(encoding="utf-8")).get("rows", [])
+                logger.warning("CONOSCE: usando cache expirada %s %d", report, year)
+            except Exception:
+                pass
+    return rows
 
 
 def fetch_market_intel(keyword: str = "", year: int | None = None, force_refresh: bool = False,
@@ -198,33 +291,7 @@ def fetch_market_intel(keyword: str = "", year: int | None = None, force_refresh
     """
     target_year = year or date.today().year
 
-    # Try cache first
-    if not force_refresh:
-        cached_rows = _load_cache(target_year)
-        if cached_rows is not None:
-            logger.debug("CONOSCE: cache hit for %d (%d rows)", target_year, len(cached_rows))
-            return summarize_rows(cached_rows, keyword, min_amount, negative_keywords)
-
-    # Download
-    rows: list[dict[str, str]] = []
-    for url in _candidate_urls(target_year):
-        data = _download_bytes(url)
-        if data:
-            rows = _parse_xlsx_rows(data)
-            if rows:
-                _save_cache(target_year, rows)
-                logger.info("CONOSCE: downloaded %d rows from %s", len(rows), url)
-                break
-
-    if not rows:
-        # Try expired cache as last resort
-        path = _cache_key_path(target_year)
-        if path.exists():
-            try:
-                rows = json.loads(path.read_text(encoding="utf-8")).get("rows", [])
-                logger.warning("CONOSCE: using stale cache for %d", target_year)
-            except Exception:
-                pass
+    rows = _fetch_report_rows(target_year, "convocatorias", force_refresh)
 
     if not rows:
         return {
@@ -244,5 +311,12 @@ def fetch_market_intel(keyword: str = "", year: int | None = None, force_refresh
         }
 
     result = summarize_rows(rows, keyword, min_amount, negative_keywords)
+
+    # Ganadores recurrentes: viven en el reporte de ADJUDICACIONES (convocatorias no
+    # trae postor). Si aún no está publicado el del año en curso, se deja el ranking vacío.
+    adjud_rows = _fetch_report_rows(target_year, "adjudicaciones", force_refresh)
+    if adjud_rows:
+        result["top_winners"] = summarize_winners(adjud_rows, keyword, min_amount, negative_keywords)
+
     result["status"] = "ok"
     return result

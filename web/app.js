@@ -1032,7 +1032,7 @@ async function runMarketIntel(event) {
         <div class="dashboard-grid">
           ${renderRankingPanel('Entidades que más contratan (por monto)', data.top_entities || [], 'amount')}
           ${renderRankingPanel('Categorías (por monto)', data.top_categories || [], 'amount')}
-          ${renderRankingPanel('Ganadores recurrentes', data.top_winners || [], 'count', 'adj.')}
+          ${renderRankingPanel('Ganadores recurrentes (por monto adjudicado)', data.top_winners || [], 'amount')}
         </div>
         ${state.intelRecords.length ? `<div class="panel">
           <h2>Obras de mayor monto (mayor ticket)</h2>
